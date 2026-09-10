@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
-  Home, FileText, Users, Settings, Plus, Search, Smartphone, Wrench,
-  CheckCircle, Clock, Menu, X, DollarSign, MessageCircle, Printer,
-  Package, Trash2, ShieldCheck, LogOut, RefreshCw, AlertCircle, Save
+  Home, FileText, Users, Settings, Plus, Search, Wrench,
+  CheckCircle, Clock, Menu, X, DollarSign, MessageCircle,
+  Printer, Package, Trash2, LogOut, RefreshCw, AlertCircle,
+  Save, ChevronRight, Pencil, Camera
 } from 'lucide-react'
 import { supabase } from './lib/supabaseClient'
 
@@ -12,310 +13,2897 @@ const statusLabels = {
   awaiting_part: 'Aguardando peça',
   completed: 'Finalizado',
   delivered: 'Entregue',
-  cancelled: 'Cancelado',
-}
-const statusClasses = {
-  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  in_progress: 'bg-blue-100 text-blue-800 border-blue-200',
-  awaiting_part: 'bg-purple-100 text-purple-800 border-purple-200',
-  completed: 'bg-green-100 text-green-800 border-green-200',
-  delivered: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  cancelled: 'bg-red-100 text-red-800 border-red-200',
+  cancelled: 'Cancelado'
 }
 
-function money(v) {
-  return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const statusClasses = {
+  pending: 'bg-amber-50 text-amber-700 border-amber-200',
+  in_progress: 'bg-blue-50 text-blue-700 border-blue-200',
+  awaiting_part: 'bg-violet-50 text-violet-700 border-violet-200',
+  completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  delivered: 'bg-green-50 text-green-700 border-green-200',
+  cancelled: 'bg-red-50 text-red-700 border-red-200'
 }
-function dateBR(v) {
-  if (!v) return '-'
-  return new Date(v).toLocaleDateString('pt-BR')
+
+const money = v =>
+  Number(v || 0).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  })
+
+const dateBR = v => v ? new Date(v).toLocaleDateString('pt-BR') : '-'
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  placeholder = '',
+  required = false,
+  area = false
+}) {
+  return (
+    <label className="block">
+      <span className="label">{label}</span>
+      {area ? (
+        <textarea
+          required={required}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="input min-h-24"
+        />
+      ) : (
+        <input
+          required={required}
+          type={type}
+          step={type === 'number' ? '0.01' : undefined}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="input"
+        />
+      )}
+    </label>
+  )
 }
+
 function StatusBadge({ status }) {
-  return <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${statusClasses[status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>{statusLabels[status] || status}</span>
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${statusClasses[status] || ''}`}>
+      {statusLabels[status] || status}
+    </span>
+  )
 }
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [authMode, setAuthMode] = useState('login')
   const [tab, setTab] = useState('dashboard')
   const [mobileMenu, setMobileMenu] = useState(false)
+
   const [orders, setOrders] = useState([])
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
+  const [team, setTeam] = useState([])
+  const [invites, setInvites] = useState([])
+
   const [profile, setProfile] = useState(null)
   const [company, setCompany] = useState(null)
+  const [companyLogoUrl, setCompanyLogoUrl] = useState('')
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [clientProfileId, setClientProfileId] = useState(null)
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
+
+  function success(text) {
+    setNotice(text)
+    setTimeout(() => setNotice(''), 3000)
+  }
 
   useEffect(() => {
-    let mounted = true
     supabase.auth.getSession().then(({ data }) => {
-      if (mounted) {
-        setSession(data.session)
-        setLoadingAuth(false)
-      }
+      setSession(data.session)
+      setLoadingAuth(false)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+
+    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next)
       setLoadingAuth(false)
     })
-    return () => { mounted = false; listener.subscription.unsubscribe() }
+
+    return () => data.subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
-    if (session?.user) loadAll()
+    if (session?.user?.id) loadAll()
   }, [session?.user?.id])
 
+  async function loadCompanyLogo(companyData) {
+    if (!companyData?.logo_path) {
+      setCompanyLogoUrl('')
+      return
+    }
+
+    const { data, error } = await supabase.storage
+      .from('company-logos')
+      .createSignedUrl(companyData.logo_path, 60 * 60 * 24 * 7)
+
+    if (error) {
+      console.error(error)
+      setCompanyLogoUrl('')
+      return
+    }
+
+    setCompanyLogoUrl(data?.signedUrl || '')
+  }
+
   async function loadAll() {
-    setLoading(true); setError('')
+    if (!session?.user) return
+
+    setLoading(true)
+    setError('')
+
     try {
       const [p, c, s, o] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, role, company_id').eq('id', session.user.id).single(),
-        supabase.from('clients').select('*').order('created_at', { ascending: false }),
-        supabase.from('services').select('*').order('name'),
-        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single(),
+
+        supabase
+          .from('clients')
+          .select('*')
+          .order('created_at', { ascending: false }),
+
+        supabase
+          .from('services')
+          .select('*')
+          .order('name'),
+
+        supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
       ])
+
       if (p.error) throw p.error
       if (c.error) throw c.error
       if (s.error) throw s.error
       if (o.error) throw o.error
+
       setProfile(p.data)
       setClients(c.data || [])
       setServices(s.data || [])
       setOrders(o.data || [])
+
+      const { data: teamData, error: teamError } = await supabase
+        .from('profiles')
+        .select('id, full_name, role, created_at')
+        .order('created_at', { ascending: true })
+
+      if (teamError) throw teamError
+
+      setTeam(teamData || [])
+
+      if (p.data?.role === 'supervisor') {
+        const { data: inviteData, error: inviteError } = await supabase
+          .from('team_invites')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (inviteError) throw inviteError
+
+        setInvites(inviteData || [])
+      } else {
+        setInvites([])
+      }
+
       if (p.data?.company_id) {
-        const { data: co, error: ce } = await supabase.from('companies').select('*').eq('id', p.data.company_id).single()
+        const { data: co, error: ce } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', p.data.company_id)
+          .single()
+
         if (ce) throw ce
         setCompany(co)
+        await loadCompanyLogo(co)
       }
     } catch (e) {
-      setError(e.message || 'Não foi possível carregar os dados.')
-    } finally { setLoading(false) }
+      setError(e.message || 'Erro ao carregar os dados.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  async function signOut() { await supabase.auth.signOut(); setOrders([]); setClients([]); setServices([]); setProfile(null); setCompany(null) }
+  async function addClient(form) {
+    setError('')
+
+    const { data, error: e } = await supabase
+      .from('clients')
+      .insert({
+        name: form.name,
+        phone: form.phone || null,
+        email: form.email || null,
+        address: form.address || null,
+        notes: form.notes || null
+      })
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setClients(prev => [data, ...prev])
+    success('Cliente salvo com sucesso.')
+    return true
+  }
+
+  async function updateClient(id, form) {
+    setError('')
+
+    const { data, error: e } = await supabase
+      .from('clients')
+      .update({
+        name: form.name,
+        phone: form.phone || null,
+        email: form.email || null,
+        address: form.address || null,
+        notes: form.notes || null
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setClients(prev => prev.map(c => c.id === id ? data : c))
+    success('Cliente atualizado.')
+    return true
+  }
+
+  async function deleteClient(id) {
+    if (!confirm('Excluir este cliente?')) return
+
+    const { error: e } = await supabase
+      .from('clients')
+      .delete()
+      .eq('id', id)
+
+    if (e) {
+      setError(e.message)
+      return
+    }
+
+    setClients(prev => prev.filter(c => c.id !== id))
+    success('Cliente excluído.')
+  }
+
+  async function addService(form) {
+    setError('')
+
+    const { data, error: e } = await supabase
+      .from('services')
+      .insert({
+        name: form.name,
+        price: Number(form.price || 0),
+        warranty: form.warranty || null,
+        description: form.description || null
+      })
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setServices(prev =>
+      [...prev, data].sort((a, b) => a.name.localeCompare(b.name))
+    )
+
+    success('Serviço salvo.')
+    return true
+  }
+
+  async function updateService(id, form) {
+    setError('')
+
+    const { data, error: e } = await supabase
+      .from('services')
+      .update({
+        name: form.name,
+        price: Number(form.price || 0),
+        warranty: form.warranty || null,
+        description: form.description || null
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setServices(prev =>
+      prev
+        .map(service => service.id === id ? data : service)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
+
+    success('Serviço atualizado com sucesso.')
+    return true
+  }
+
+  async function deleteService(id) {
+    if (!confirm('Excluir este serviço?')) return
+
+    const { error: e } = await supabase
+      .from('services')
+      .delete()
+      .eq('id', id)
+
+    if (e) {
+      setError(e.message)
+      return
+    }
+
+    setServices(prev => prev.filter(s => s.id !== id))
+    success('Serviço excluído.')
+  }
 
   async function createOrder(form) {
     setError('')
-    const { data, error: e } = await supabase.from('orders').insert({
-      client_id: form.client_id || null,
-      client_name: form.client_name,
-      client_phone: form.client_phone,
-      device: form.device,
-      imei: form.imei,
-      issue: form.issue,
-      diagnosis: form.diagnosis,
-      password_notes: form.password_notes,
-      accessories: form.accessories,
-      status: 'pending',
-      total: Number(form.total || 0),
-      warranty: form.warranty,
-      notes: form.notes,
-    }).select().single()
-    if (e) { setError(e.message); return false }
+
+    const { data, error: e } = await supabase
+      .from('orders')
+      .insert({
+        client_id: form.client_id || null,
+        client_name: form.client_name,
+        client_phone: form.client_phone || null,
+        device: form.device,
+        imei: form.imei || null,
+        issue: form.issue || null,
+        diagnosis: form.diagnosis || null,
+        password_notes: form.password_notes || null,
+        accessories: form.accessories || null,
+        status: 'pending',
+        total: Number(form.total || 0),
+        warranty: form.warranty || null,
+        notes: form.notes || null
+      })
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    let fotosComErro = 0
+
+    if (form.photos?.length) {
+      for (const file of form.photos) {
+        try {
+          const originalExt = (file.name.split('.').pop() || 'jpg').toLowerCase()
+          const ext = /^[a-z0-9]+$/.test(originalExt) ? originalExt : 'jpg'
+          const token = globalThis.crypto?.randomUUID?.()
+            || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+          const path = `${profile.company_id}/${data.id}/${token}.${ext}`
+
+          const { error: uploadError } = await supabase.storage
+            .from('order-photos')
+            .upload(path, file, {
+              contentType: file.type || 'image/jpeg',
+              upsert: false
+            })
+
+          if (uploadError) throw uploadError
+
+          const { error: photoError } = await supabase
+            .from('order_photos')
+            .insert({
+              order_id: data.id,
+              storage_path: path,
+              file_name: file.name
+            })
+
+          if (photoError) {
+            await supabase.storage.from('order-photos').remove([path])
+            throw photoError
+          }
+        } catch (fotoErro) {
+          console.error('Erro ao enviar foto:', fotoErro)
+          fotosComErro++
+        }
+      }
+    }
+
     setOrders(prev => [data, ...prev])
+
+    if (fotosComErro) {
+      setError(`OS #${data.number} foi salva, mas ${fotosComErro} foto(s) não foram enviadas.`)
+    } else {
+      success(`OS #${data.number} criada com sucesso${form.photos?.length ? ` com ${form.photos.length} foto(s)` : ''}.`)
+    }
+
     setTab('orders')
     return true
   }
 
   async function updateOrder(id, patch) {
-    const { data, error: e } = await supabase.from('orders').update(patch).eq('id', id).select().single()
-    if (e) { setError(e.message); return false }
-    setOrders(prev => prev.map(x => x.id === id ? data : x))
+    const { data, error: e } = await supabase
+      .from('orders')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setOrders(prev => prev.map(o => o.id === id ? data : o))
+    success('OS atualizada.')
     return true
   }
 
-  async function addClient(form) {
-    const { data, error: e } = await supabase.from('clients').insert(form).select().single()
-    if (e) { setError(e.message); return false }
-    setClients(prev => [data, ...prev]); return true
+  async function saveCompanyBranding(form, logoFile) {
+    if (!company?.id) return false
+
+    setError('')
+
+    try {
+      let logoPath = company.logo_path || null
+
+      if (logoFile) {
+        if (!logoFile.type?.startsWith('image/')) {
+          throw new Error('Selecione uma imagem válida para a logo.')
+        }
+
+        if (logoFile.size > 3 * 1024 * 1024) {
+          throw new Error('A logo deve ter no máximo 3 MB.')
+        }
+
+        const extOriginal = (logoFile.name.split('.').pop() || 'png').toLowerCase()
+        const ext = /^[a-z0-9]+$/.test(extOriginal) ? extOriginal : 'png'
+
+        const newPath = `${company.id}/logo-${Date.now()}.${ext}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('company-logos')
+          .upload(newPath, logoFile, {
+            contentType: logoFile.type,
+            upsert: false
+          })
+
+        if (uploadError) throw uploadError
+
+        if (company.logo_path && company.logo_path !== newPath) {
+          await supabase.storage
+            .from('company-logos')
+            .remove([company.logo_path])
+        }
+
+        logoPath = newPath
+      }
+
+      const { data, error } = await supabase
+        .from('companies')
+        .update({
+          name: form.name.trim(),
+          system_name: form.system_name?.trim() || form.name.trim(),
+          primary_color: form.primary_color || '#2563eb',
+          logo_path: logoPath
+        })
+        .eq('id', company.id)
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setCompany(data)
+      await loadCompanyLogo(data)
+
+      success('Identidade da assistência atualizada.')
+      return true
+
+    } catch (e) {
+      setError(e.message || 'Não foi possível salvar a identidade.')
+      return false
+    }
   }
 
-  async function deleteClient(id) {
-    if (!confirm('Excluir este cliente?')) return
-    const { error: e } = await supabase.from('clients').delete().eq('id', id)
-    if (e) { setError(e.message); return }
-    setClients(prev => prev.filter(x => x.id !== id))
+  async function createTeamInvite(email) {
+    setError('')
+
+    if (profile?.role !== 'supervisor') {
+      setError('Somente o supervisor pode adicionar técnicos.')
+      return null
+    }
+
+    if (team.length >= Number(company?.max_users || 1)) {
+      setError('O limite de usuários do plano foi atingido.')
+      return null
+    }
+
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedEmail) {
+      setError('Informe o e-mail do técnico.')
+      return null
+    }
+
+    const { data, error: e } = await supabase
+      .from('team_invites')
+      .insert({
+        company_id: profile.company_id,
+        email: normalizedEmail,
+        created_by: session.user.id
+      })
+      .select()
+      .single()
+
+    if (e) {
+      setError(e.message)
+      return null
+    }
+
+    setInvites(prev => [data, ...prev])
+    success('Convite para técnico criado.')
+
+    return data
   }
 
-  async function addService(form) {
-    const { data, error: e } = await supabase.from('services').insert({ ...form, price: Number(form.price || 0) }).select().single()
-    if (e) { setError(e.message); return false }
-    setServices(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name))); return true
+  async function deleteTeamInvite(id) {
+    const { error: e } = await supabase
+      .from('team_invites')
+      .delete()
+      .eq('id', id)
+
+    if (e) {
+      setError(e.message)
+      return
+    }
+
+    setInvites(prev => prev.filter(x => x.id !== id))
+    success('Convite cancelado.')
   }
 
-  async function deleteService(id) {
-    if (!confirm('Excluir este serviço?')) return
-    const { error: e } = await supabase.from('services').delete().eq('id', id)
-    if (e) { setError(e.message); return }
-    setServices(prev => prev.filter(x => x.id !== id))
+  async function signOut() {
+    await supabase.auth.signOut()
   }
 
-  if (loadingAuth) return <FullScreen message="Carregando TechOS Pro..." />
-  if (!session) return <AuthScreen mode={authMode} setMode={setAuthMode} />
+  if (loadingAuth) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] grid place-items-center text-white">
+        <div className="text-center">
+          <Wrench size={42} className="mx-auto mb-3 text-blue-400"/>
+          Carregando TechOS Pro...
+        </div>
+      </div>
+    )
+  }
 
-  const pending = orders.filter(x => ['pending','in_progress','awaiting_part'].includes(x.status)).length
-  const completed = orders.filter(x => ['completed','delivered'].includes(x.status)).length
-  const revenue = orders.filter(x => ['completed','delivered'].includes(x.status)).reduce((a,b) => a + Number(b.total || 0), 0)
+  if (!session) return <AuthScreen />
+
+  const pending = orders.filter(o =>
+    ['pending', 'in_progress', 'awaiting_part'].includes(o.status)
+  ).length
+
+  const completed = orders.filter(o =>
+    ['completed', 'delivered'].includes(o.status)
+  ).length
+
+  const revenue = orders
+    .filter(o => ['completed', 'delivered'].includes(o.status))
+    .reduce((a, b) => a + Number(b.total || 0), 0)
+
+  const isSupervisor = profile?.role === 'supervisor'
 
   const nav = [
-    ['dashboard', <Home size={19}/>, 'Dashboard'],
+    ['dashboard', <Home size={19}/>, isSupervisor ? 'Painel Supervisor' : 'Painel Técnico'],
     ['orders', <FileText size={19}/>, 'Ordens de Serviço'],
     ['clients', <Users size={19}/>, 'Clientes'],
-    ['catalog', <Package size={19}/>, 'Catálogo'],
-    ['settings', <Settings size={19}/>, 'Configurações'],
+    ...(isSupervisor ? [
+      ['catalog', <Package size={19}/>, 'Catálogo'],
+      ['team', <Users size={19}/>, 'Equipe']
+    ] : []),
+    ['settings', <Settings size={19}/>, 'Minha conta']
   ]
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-800">
-      <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white shadow-xl">
-        <Brand />
-        <nav className="flex-1 px-4 space-y-2 mt-4">
-          {nav.map(([id, icon, label]) => <NavItem key={id} icon={icon} label={label} active={tab === id} onClick={() => setTab(id)} />)}
+    <div
+      className="flex h-screen bg-[#F6F7F9] text-slate-800"
+      style={{ '--brand-color': company?.primary_color || '#2563eb' }}
+    >
+
+      <aside className="hidden md:flex flex-col w-64 bg-[#0B1220] text-white">
+        <div className="p-6 flex items-center gap-3">
+          {companyLogoUrl ? (
+            <img
+              src={companyLogoUrl}
+              alt="Logo"
+              className="w-11 h-11 rounded-xl object-contain bg-white p-1"
+            />
+          ) : (
+            <div
+              className="p-2.5 rounded-xl text-white"
+              style={{ backgroundColor: 'var(--brand-color)' }}
+            >
+              <Wrench size={23}/>
+            </div>
+          )}
+
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold truncate">
+              {company?.system_name || company?.name || 'TechOS Pro'}
+            </h1>
+            <p className="text-[11px] text-slate-400">
+              Powered by TechOS Pro
+            </p>
+          </div>
+        </div>
+
+        <nav className="flex-1 px-3 space-y-1">
+          {nav.map(([id, icon, label]) => (
+            <NavItem
+              key={id}
+              icon={icon}
+              label={label}
+              active={tab === id}
+              onClick={() => setTab(id)}
+            />
+          ))}
         </nav>
-        <div className="p-4 bg-slate-800 m-4 rounded-xl text-sm">
-          <p className="text-slate-400 mb-1">Plano</p>
-          <p className="font-semibold text-green-400">MVP Gratuito</p>
-          <p className="text-xs text-slate-400 mt-2 truncate">{company?.name || 'Sua assistência'}</p>
+
+        <div className="m-4 p-4 bg-white/5 rounded-2xl">
+          <p className="text-xs text-slate-400">Empresa</p>
+          <p className="font-semibold truncate mt-1">
+            {company?.name || 'TechOS Pro'}
+          </p>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b flex items-center justify-between px-4 md:px-8 shrink-0">
-          <div className="flex items-center gap-3">
-            <button className="md:hidden p-2 rounded-lg hover:bg-slate-100" onClick={() => setMobileMenu(v => !v)}>{mobileMenu ? <X/> : <Menu/>}</button>
-            <h2 className="font-semibold hidden sm:block">{tab === 'new-order' ? 'Nova OS' : nav.find(x => x[0] === tab)?.[2] || 'TechOS Pro'}</h2>
+
+        <header className="h-16 bg-white/95 border-b border-slate-200 flex items-center justify-between px-4 md:px-7">
+
+          <button
+            className="md:hidden p-2"
+            onClick={() => setMobileMenu(v => !v)}
+          >
+            {mobileMenu ? <X/> : <Menu/>}
+          </button>
+
+          <div className="hidden md:block">
+            <p className="font-semibold">
+              {tab === 'new-order'
+                ? 'Nova Ordem de Serviço'
+                : nav.find(n => n[0] === tab)?.[2]}
+            </p>
           </div>
+
           <div className="flex items-center gap-3">
-            <button onClick={loadAll} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg" title="Atualizar"><RefreshCw size={18}/></button>
-            <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">{(profile?.full_name || session.user.email || 'T')[0].toUpperCase()}</div>
+            <button
+              onClick={loadAll}
+              className="p-2.5 rounded-xl hover:bg-slate-100"
+            >
+              <RefreshCw size={18}/>
+            </button>
+
+            <button
+              onClick={() => setTab('settings')}
+              className="w-10 h-10 rounded-full bg-slate-900 text-white font-semibold overflow-hidden"
+            >
+              {companyLogoUrl ? (
+                <img
+                  src={companyLogoUrl}
+                  alt="Logo da assistência"
+                  className="w-full h-full object-contain bg-white p-1"
+                />
+              ) : (
+                (profile?.full_name || session.user.email || 'T')[0].toUpperCase()
+              )}
+            </button>
           </div>
         </header>
 
-        {mobileMenu && <div className="md:hidden absolute top-16 left-0 right-0 z-50 bg-slate-900 p-4 space-y-2 shadow-xl">
-          {nav.map(([id, icon, label]) => <NavItem key={id} icon={icon} label={label} active={tab === id} onClick={() => {setTab(id);setMobileMenu(false)}} />)}
-          <button onClick={signOut} className="w-full flex gap-3 items-center px-4 py-3 text-red-300"><LogOut size={19}/> Sair</button>
-        </div>}
+        {mobileMenu && (
+          <div className="md:hidden absolute top-16 left-0 right-0 z-50 bg-[#0B1220] p-4 space-y-1 shadow-2xl">
+            {nav.map(([id, icon, label]) => (
+              <NavItem
+                key={id}
+                icon={icon}
+                label={label}
+                active={tab === id}
+                onClick={() => {
+                  setTab(id)
+                  setMobileMenu(false)
+                }}
+              />
+            ))}
 
-        <main className="flex-1 overflow-auto p-4 md:p-8">
-          {error && <div className="max-w-7xl mx-auto mb-4 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 flex items-center gap-2"><AlertCircle size={18}/><span className="text-sm">{error}</span><button className="ml-auto" onClick={() => setError('')}><X size={17}/></button></div>}
-          {loading && <div className="max-w-7xl mx-auto mb-4 text-sm text-slate-500">Sincronizando...</div>}
-          {tab === 'dashboard' && <Dashboard orders={orders} pending={pending} completed={completed} revenue={revenue} onNew={() => setTab('new-order')} />}
-          {tab === 'orders' && <Orders orders={orders} onNew={() => setTab('new-order')} onUpdate={updateOrder} />}
-          {tab === 'new-order' && <NewOrder clients={clients} services={services} onSave={createOrder} onCancel={() => setTab('orders')} />}
-          {tab === 'clients' && <Clients clients={clients} onAdd={addClient} onDelete={deleteClient} />}
-          {tab === 'catalog' && <Catalog services={services} onAdd={addService} onDelete={deleteService} />}
-          {tab === 'settings' && <SettingsView company={company} profile={profile} session={session} onSignOut={signOut} />}
+            <button
+              onClick={signOut}
+              className="w-full flex items-center gap-3 px-4 py-3 text-red-300"
+            >
+              <LogOut size={19}/> Sair
+            </button>
+          </div>
+        )}
+
+        <main className="flex-1 overflow-auto p-4 md:p-7">
+
+          {notice && (
+            <div className="max-w-7xl mx-auto mb-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl px-4 py-3">
+              <CheckCircle size={18} className="inline mr-2"/>
+              {notice}
+            </div>
+          )}
+
+          {error && (
+            <div className="max-w-7xl mx-auto mb-4 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 flex gap-2">
+              <AlertCircle size={18}/>
+              <span className="text-sm">{error}</span>
+              <button onClick={() => setError('')} className="ml-auto">
+                <X size={17}/>
+              </button>
+            </div>
+          )}
+
+          {loading && (
+            <p className="text-sm text-slate-500 mb-3">
+              Sincronizando...
+            </p>
+          )}
+
+          {tab === 'dashboard' && (
+            <Dashboard
+              orders={orders}
+              pending={pending}
+              completed={completed}
+              revenue={revenue}
+              isSupervisor={isSupervisor}
+              onNew={() => setTab('new-order')}
+              onClient={id => setClientProfileId(id)}
+              onEdit={id => setSelectedOrderId(id)}
+              company={company}
+              companyLogoUrl={companyLogoUrl}
+            />
+          )}
+
+          {tab === 'orders' && (
+            <Orders
+              orders={orders}
+              onNew={() => setTab('new-order')}
+              onUpdate={updateOrder}
+              onEdit={id => setSelectedOrderId(id)}
+            />
+          )}
+
+          {tab === 'new-order' && (
+            <NewOrder
+              clients={clients}
+              services={services}
+              onSave={createOrder}
+              onCancel={() => setTab('orders')}
+            />
+          )}
+
+          {tab === 'clients' && (
+            <Clients
+              clients={clients}
+              orders={orders}
+              onAdd={addClient}
+              onUpdate={updateClient}
+              onDelete={deleteClient}
+            />
+          )}
+
+          {tab === 'catalog' && (
+            <Catalog
+              services={services}
+              onAdd={addService}
+              onUpdate={updateService}
+              onDelete={deleteService}
+            />
+          )}
+
+          {tab === 'team' && isSupervisor && (
+            <TeamView
+              team={team}
+              invites={invites}
+              company={company}
+              onCreateInvite={createTeamInvite}
+              onDeleteInvite={deleteTeamInvite}
+            />
+          )}
+
+          {tab === 'settings' && (
+            isSupervisor ? (
+              <SettingsView
+                company={company}
+                profile={profile}
+                session={session}
+                onSignOut={signOut}
+                companyLogoUrl={companyLogoUrl}
+                onSaveCompany={saveCompanyBranding}
+              />
+            ) : (
+              <TechnicianSettings
+                company={company}
+                profile={profile}
+                session={session}
+                onSignOut={signOut}
+              />
+            )
+          )}
+
         </main>
+      </div>
+
+      {selectedOrderId && orders.find(o => o.id === selectedOrderId) && (
+        <EditOrderModal
+          order={orders.find(o => o.id === selectedOrderId)}
+          clients={clients}
+          services={services}
+          onSave={updateOrder}
+          onClose={() => setSelectedOrderId(null)}
+        />
+      )}
+
+      {clientProfileId && clients.find(c => c.id === clientProfileId) && (
+        <ClientProfile
+          client={clients.find(c => c.id === clientProfileId)}
+          orders={orders.filter(o => o.client_id === clientProfileId)}
+          onUpdate={updateClient}
+          onDelete={deleteClient}
+          onClose={() => setClientProfileId(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function NavItem({ icon, label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${
+        active
+          ? 'bg-blue-600 text-white'
+          : 'text-slate-300 hover:bg-white/10'
+      }`}
+    >
+      {icon}
+      <span className="font-medium">{label}</span>
+    </button>
+  )
+}
+
+function AuthScreen() {
+  const [register, setRegister] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [company, setCompany] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true)
+    setErr('')
+    setMsg('')
+
+    try {
+      if (register) {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+              company_name: company,
+              invite_code: inviteCode.trim()
+            }
+          }
+        })
+
+        if (error) throw error
+        setMsg(
+          inviteCode.trim()
+            ? 'Acesso de técnico criado. Verifique seu e-mail se solicitado.'
+            : 'Conta de supervisor criada. Verifique seu e-mail se solicitado.'
+        )
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        })
+
+        if (error) throw error
+      }
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0B1220] flex items-center justify-center p-4">
+
+      <div className="w-full max-w-md bg-white rounded-[28px] shadow-2xl p-7">
+
+        <div className="flex items-center gap-3 mb-7">
+          <div className="bg-blue-600 text-white p-3 rounded-2xl">
+            <Wrench/>
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-bold">
+              TechOS<span className="text-blue-600">Pro</span>
+            </h1>
+            <p className="text-sm text-slate-500">
+              Gestão para assistência técnica
+            </p>
+          </div>
+        </div>
+
+        {err && (
+          <div className="bg-red-50 text-red-700 p-3 rounded-xl mb-4 text-sm">
+            {err}
+          </div>
+        )}
+
+        {msg && (
+          <div className="bg-green-50 text-green-700 p-3 rounded-xl mb-4 text-sm">
+            {msg}
+          </div>
+        )}
+
+        <form onSubmit={submit} className="space-y-4">
+
+          {register && (
+            <>
+              <Field
+                label="Seu nome"
+                value={name}
+                onChange={setName}
+                required
+              />
+
+              <Field
+                label="Código de convite da equipe"
+                value={inviteCode}
+                onChange={setInviteCode}
+                placeholder="Opcional para técnicos"
+              />
+
+              {!inviteCode.trim() && (
+                <Field
+                  label="Nome da assistência"
+                  value={company}
+                  onChange={setCompany}
+                  placeholder="Nome da sua empresa"
+                  required
+                />
+              )}
+
+              {inviteCode.trim() && (
+                <div className="bg-blue-50 border border-blue-100 text-blue-700 text-sm p-3 rounded-xl">
+                  Você está criando um acesso de Técnico para uma assistência existente.
+                </div>
+              )}
+            </>
+          )}
+
+          <Field
+            label="E-mail"
+            type="email"
+            value={email}
+            onChange={setEmail}
+            placeholder="Digite seu e-mail"
+            required
+          />
+
+          <Field
+            label="Senha"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            placeholder="Digite sua senha"
+            required
+          />
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold disabled:opacity-50"
+          >
+            {busy
+              ? 'Aguarde...'
+              : register
+                ? 'Criar conta'
+                : 'Entrar'}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => setRegister(v => !v)}
+          className="w-full mt-5 text-sm text-blue-600"
+        >
+          {register
+            ? 'Já tenho uma conta'
+            : 'Ainda não tenho conta'}
+        </button>
       </div>
     </div>
   )
 }
 
-function FullScreen({message}) { return <div className="min-h-screen grid place-items-center bg-slate-900 text-white"><div className="text-center"><Wrench className="mx-auto mb-3 text-blue-400" size={42}/><p>{message}</p></div></div> }
-function Brand() { return <div className="p-6 flex items-center gap-3"><div className="bg-blue-500 p-2 rounded-lg"><Wrench size={24}/></div><h1 className="text-2xl font-bold">TechOS<span className="text-blue-400">Pro</span></h1></div> }
-function NavItem({icon,label,active,onClick}) { return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition ${active ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>{icon}<span className="font-medium">{label}</span></button> }
+function Dashboard({ orders, pending, completed, revenue, isSupervisor, onNew, onClient, onEdit }) {
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
 
-function AuthScreen({mode,setMode}) {
-  const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [name,setName]=useState(''); const [company,setCompany]=useState(''); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState(''); const [err,setErr]=useState('')
+      <div className="flex justify-between items-start gap-4">
+        <div>
+          <p className="text-sm text-slate-500">Visão geral</p>
+          <h1 className="text-2xl font-bold">
+            {isSupervisor ? 'Painel do Supervisor' : 'Painel do Técnico'}
+          </h1>
+        </div>
+
+        <button onClick={onNew} className="btn-primary">
+          <Plus size={19}/> Nova OS
+        </button>
+      </div>
+
+      <div className={`grid ${isSupervisor ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
+        <Stat
+          title="OS em andamento"
+          value={pending}
+          icon={<Clock/>}
+        />
+
+        <Stat
+          title="OS concluídas"
+          value={completed}
+          icon={<CheckCircle/>}
+        />
+
+        {isSupervisor && (
+          <Stat
+            title="Faturamento"
+            value={money(revenue)}
+            icon={<DollarSign/>}
+          />
+        )}
+      </div>
+
+      <div className="surface overflow-hidden">
+        <div className="p-5 border-b font-semibold">Últimas OS</div>
+
+        {orders.length === 0 ? (
+          <Empty text="Nenhuma OS cadastrada."/>
+        ) : (
+          orders.slice(0, 5).map(o => (
+            <div
+              key={o.id}
+              onClick={() => onEdit(o.id)}
+              className="p-4 border-b last:border-0 flex justify-between gap-3 cursor-pointer hover:bg-slate-50 active:bg-slate-100"
+            >
+              <div>
+                {o.client_id ? (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation()
+                      onClient(o.client_id)
+                    }}
+                    className="font-bold text-left hover:text-blue-600 active:text-blue-700"
+                  >
+                    {o.client_name || 'Cliente'}
+                  </button>
+                ) : (
+                  <b>{o.client_name || 'Cliente'}</b>
+                )}
+                <p className="text-sm text-slate-500">
+                  OS #{o.number} • {o.device}
+                </p>
+              </div>
+
+              <StatusBadge status={o.status}/>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Stat({ title, value, icon }) {
+  return (
+    <div className="surface p-5 flex items-center justify-between">
+      <div>
+        <p className="text-sm text-slate-500">{title}</p>
+        <p className="text-2xl font-bold mt-1">{value}</p>
+      </div>
+
+      <div className="p-3 bg-slate-100 rounded-xl text-blue-600">
+        {icon}
+      </div>
+    </div>
+  )
+}
+
+function Clients({ clients, orders, onAdd, onUpdate, onDelete }) {
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState(null)
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-5">
+
+      <div className="flex justify-between items-center">
+        <div>
+          <p className="text-sm text-slate-500">Cadastros</p>
+          <h1 className="text-2xl font-bold">Clientes</h1>
+        </div>
+
+        <button onClick={() => setOpen(true)} className="btn-primary">
+          <Plus size={19}/> Novo
+        </button>
+      </div>
+
+      <div className="surface overflow-hidden">
+
+        {clients.length === 0 ? (
+          <Empty text="Nenhum cliente cadastrado."/>
+        ) : (
+          clients.map(client => (
+            <button
+              key={client.id}
+              onClick={() => setSelected(client)}
+              className="w-full p-4 border-b last:border-0 flex items-center text-left hover:bg-slate-50"
+            >
+              <div className="w-11 h-11 bg-blue-50 text-blue-700 rounded-full flex items-center justify-center font-bold mr-3">
+                {client.name?.[0]?.toUpperCase()}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold truncate">{client.name}</p>
+                <p className="text-sm text-slate-500 truncate">
+                  {client.phone || 'Sem telefone'}
+                </p>
+              </div>
+
+              <ChevronRight size={20} className="text-slate-400"/>
+            </button>
+          ))
+        )}
+      </div>
+
+      {open && (
+        <NewClientModal
+          onClose={() => setOpen(false)}
+          onSave={onAdd}
+        />
+      )}
+
+      {selected && (
+        <ClientProfile
+          client={clients.find(c => c.id === selected.id) || selected}
+          orders={orders.filter(o => o.client_id === selected.id)}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function NewClientModal({ onClose, onSave }) {
+  const [f, setF] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    notes: ''
+  })
+
+  const [saving, setSaving] = useState(false)
+
   async function submit(e) {
-    e.preventDefault(); setBusy(true); setErr(''); setMsg('')
-    try {
-      if (mode === 'register') {
-        if (!name || !company) throw new Error('Informe seu nome e o nome da assistência.')
-        const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name, company_name: company } } })
-        if (error) throw error
-        setMsg('Cadastro criado. Verifique seu e-mail se a confirmação estiver habilitada no Supabase.')
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      }
-    } catch(e) { setErr(e.message || 'Não foi possível continuar.') } finally { setBusy(false) }
+    e.preventDefault()
+    setSaving(true)
+
+    const ok = await onSave(f)
+
+    setSaving(false)
+
+    if (ok) onClose()
   }
-  return <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-    <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7">
-      <div className="flex items-center gap-3 mb-7"><div className="bg-blue-600 p-2.5 rounded-xl text-white"><Wrench/></div><div><h1 className="text-2xl font-bold">TechOS<span className="text-blue-600">Pro</span></h1><p className="text-sm text-slate-500">Gestão para assistência técnica</p></div></div>
-      {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm mb-4">{err}</div>}
-      {msg && <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm mb-4">{msg}</div>}
+
+  return (
+    <Modal title="Novo cliente" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
-        {mode === 'register' && <>
-          <Field label="Seu nome" value={name} onChange={setName} placeholder="João da Silva" required/>
-          <Field label="Nome da assistência" value={company} onChange={setCompany} placeholder="Minha Assistência" required/>
-        </>}
-        <Field label="E-mail" type="email" value={email} onChange={setEmail} placeholder="voce@email.com" required/>
-        <Field label="Senha" type="password" value={password} onChange={setPassword} placeholder="Mínimo recomendado: 8 caracteres" required/>
-        <button disabled={busy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white py-3 rounded-xl font-semibold">{busy ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+
+        <Field
+          label="Nome *"
+          value={f.name}
+          onChange={v => setF({...f, name:v})}
+          required
+        />
+
+        <Field
+          label="WhatsApp"
+          value={f.phone}
+          onChange={v => setF({...f, phone:v})}
+        />
+
+        <Field
+          label="E-mail"
+          type="email"
+          value={f.email}
+          onChange={v => setF({...f, email:v})}
+        />
+
+        <Field
+          label="Endereço completo"
+          value={f.address}
+          onChange={v => setF({...f, address:v})}
+          placeholder="Rua, número, bairro, cidade - UF"
+          area
+        />
+
+        <Field
+          label="Observações"
+          value={f.notes}
+          onChange={v => setF({...f, notes:v})}
+          area
+        />
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar cliente'}
+        </button>
       </form>
-      <button onClick={() => {setMode(mode==='login'?'register':'login');setErr('');setMsg('')}} className="w-full mt-4 text-sm text-blue-600 hover:underline">{mode === 'login' ? 'Ainda não tenho conta' : 'Já tenho uma conta'}</button>
-      <p className="text-xs text-center text-slate-400 mt-6">TechOS Pro • MVP</p>
+    </Modal>
+  )
+}
+
+function ClientProfile({
+  client,
+  orders,
+  onUpdate,
+  onDelete,
+  onClose
+}) {
+  const [edit, setEdit] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const [f, setF] = useState({
+    name: client.name || '',
+    phone: client.phone || '',
+    email: client.email || '',
+    address: client.address || '',
+    notes: client.notes || ''
+  })
+
+  async function save() {
+    setSaving(true)
+    const ok = await onUpdate(client.id, f)
+    setSaving(false)
+
+    if (ok) setEdit(false)
+  }
+
+  return (
+    <Modal title="Perfil do cliente" onClose={onClose}>
+
+      <div className="space-y-5">
+
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 bg-slate-900 text-white rounded-full grid place-items-center text-xl font-bold">
+            {client.name?.[0]?.toUpperCase()}
+          </div>
+
+          <div className="flex-1">
+            <h3 className="font-bold text-lg">{client.name}</h3>
+            <p className="text-sm text-slate-500">
+              Cliente desde {dateBR(client.created_at)}
+            </p>
+          </div>
+
+          <button
+            onClick={() => setEdit(v => !v)}
+            className="p-2 rounded-xl border"
+          >
+            <Pencil size={18}/>
+          </button>
+        </div>
+
+        {edit ? (
+          <div className="space-y-3">
+            <Field
+              label="Nome"
+              value={f.name}
+              onChange={v => setF({...f, name:v})}
+            />
+
+            <Field
+              label="WhatsApp"
+              value={f.phone}
+              onChange={v => setF({...f, phone:v})}
+            />
+
+            <Field
+              label="E-mail"
+              value={f.email}
+              onChange={v => setF({...f, email:v})}
+            />
+
+            <Field
+              label="Endereço completo"
+              value={f.address}
+              onChange={v => setF({...f, address:v})}
+              placeholder="Rua, número, bairro, cidade - UF"
+              area
+            />
+
+            <Field
+              label="Observações"
+              value={f.notes}
+              onChange={v => setF({...f, notes:v})}
+              area
+            />
+
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-primary w-full justify-center"
+            >
+              <Save size={18}/>
+              {saving ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+          </div>
+        ) : (
+          <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
+            <div>
+              <p className="text-xs text-slate-500">WhatsApp</p>
+              <p>{client.phone || '-'}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-500">E-mail</p>
+              <p>{client.email || '-'}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-500">Endereço</p>
+              <p>{client.address || '-'}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-500">Observações</p>
+              <p>{client.notes || '-'}</p>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <h4 className="font-semibold mb-3">
+            Histórico de OS ({orders.length})
+          </h4>
+
+          {orders.length === 0 ? (
+            <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded-xl">
+              Nenhuma OS para este cliente.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {orders.map(o => (
+                <div
+                  key={o.id}
+                  className="border rounded-xl p-3 flex justify-between gap-3"
+                >
+                  <div>
+                    <b>OS #{o.number}</b>
+                    <p className="text-sm text-slate-500">{o.device}</p>
+                  </div>
+
+                  <StatusBadge status={o.status}/>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={async () => {
+            await onDelete(client.id)
+            onClose()
+          }}
+          className="w-full py-3 text-red-600 border border-red-200 rounded-xl"
+        >
+          Excluir cliente
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+
+function EditOrderModal({ order, clients, services, onSave, onClose }) {
+  const [saving, setSaving] = useState(false)
+
+  const [f, setF] = useState({
+    client_id: order.client_id || '',
+    client_name: order.client_name || '',
+    client_phone: order.client_phone || '',
+    device: order.device || '',
+    imei: order.imei || '',
+    issue: order.issue || '',
+    diagnosis: order.diagnosis || '',
+    password_notes: order.password_notes || '',
+    accessories: order.accessories || '',
+    status: order.status || 'pending',
+    total: order.total || '',
+    warranty: order.warranty || '',
+    notes: order.notes || ''
+  })
+
+  function set(k, v) {
+    setF(prev => ({ ...prev, [k]: v }))
+  }
+
+  function selectClient(id) {
+    const c = clients.find(x => String(x.id) === String(id))
+
+    setF(prev => ({
+      ...prev,
+      client_id: id,
+      client_name: c?.name || prev.client_name,
+      client_phone: c?.phone || prev.client_phone
+    }))
+  }
+
+  function selectService(id) {
+    const service = services.find(x => String(x.id) === String(id))
+
+    if (service) {
+      setF(prev => ({
+        ...prev,
+        total: service.price,
+        warranty: service.warranty || ''
+      }))
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    setSaving(true)
+
+    const ok = await onSave(order.id, {
+      client_id: f.client_id || null,
+      client_name: f.client_name,
+      client_phone: f.client_phone || null,
+      device: f.device,
+      imei: f.imei || null,
+      issue: f.issue || null,
+      diagnosis: f.diagnosis || null,
+      password_notes: f.password_notes || null,
+      accessories: f.accessories || null,
+      status: f.status,
+      total: Number(f.total || 0),
+      warranty: f.warranty || null,
+      notes: f.notes || null
+    })
+
+    setSaving(false)
+
+    if (ok) onClose()
+  }
+
+  return (
+    <Modal title={`Editar OS #${order.number}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+
+        <label>
+          <span className="label">Cliente cadastrado</span>
+          <select
+            value={f.client_id}
+            onChange={e => selectClient(e.target.value)}
+            className="input"
+          >
+            <option value="">Sem vínculo / cliente digitado</option>
+            {clients.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <Field
+          label="Nome do cliente *"
+          value={f.client_name}
+          onChange={v => set('client_name', v)}
+          required
+        />
+
+        <Field
+          label="WhatsApp"
+          value={f.client_phone}
+          onChange={v => set('client_phone', v)}
+        />
+
+        <Field
+          label="Aparelho / modelo *"
+          value={f.device}
+          onChange={v => set('device', v)}
+          required
+        />
+
+        <Field
+          label="IMEI"
+          value={f.imei}
+          onChange={v => set('imei', v)}
+        />
+
+        <Field
+          label="Defeito relatado"
+          value={f.issue}
+          onChange={v => set('issue', v)}
+          area
+        />
+
+        <Field
+          label="Diagnóstico"
+          value={f.diagnosis}
+          onChange={v => set('diagnosis', v)}
+          area
+        />
+
+        <label>
+          <span className="label">Status</span>
+          <select
+            value={f.status}
+            onChange={e => set('status', e.target.value)}
+            className="input"
+          >
+            <option value="pending">Aguardando</option>
+            <option value="in_progress">Em análise</option>
+            <option value="awaiting_part">Aguardando peça</option>
+            <option value="completed">Finalizado</option>
+            <option value="delivered">Entregue</option>
+            <option value="cancelled">Cancelado</option>
+          </select>
+        </label>
+
+        <label>
+          <span className="label">Serviço do catálogo</span>
+          <select
+            onChange={e => selectService(e.target.value)}
+            className="input"
+          >
+            <option value="">Selecionar serviço...</option>
+            {services.map(service => (
+              <option key={service.id} value={service.id}>
+                {service.name} — {money(service.price)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <Field
+          label="Valor total"
+          type="number"
+          value={f.total}
+          onChange={v => set('total', v)}
+        />
+
+        <Field
+          label="Garantia"
+          value={f.warranty}
+          onChange={v => set('warranty', v)}
+        />
+
+        <Field
+          label="Senha / padrão"
+          value={f.password_notes}
+          onChange={v => set('password_notes', v)}
+        />
+
+        <Field
+          label="Acessórios recebidos"
+          value={f.accessories}
+          onChange={v => set('accessories', v)}
+        />
+
+        <Field
+          label="Observações"
+          value={f.notes}
+          onChange={v => set('notes', v)}
+          area
+        />
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar alterações'}
+        </button>
+
+      </form>
+    </Modal>
+  )
+}
+
+function Orders({ orders, onNew, onUpdate, onEdit, company, companyLogoUrl }) {
+  const [q, setQ] = useState('')
+
+  const filtered = orders.filter(o =>
+    `${o.number} ${o.client_name || ''} ${o.device || ''}`
+      .toLowerCase()
+      .includes(q.toLowerCase())
+  )
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-5">
+
+      <div className="flex justify-between items-center">
+        <div>
+          <p className="text-sm text-slate-500">Atendimentos</p>
+          <h1 className="text-2xl font-bold">Ordens de Serviço</h1>
+        </div>
+
+        <button onClick={onNew} className="btn-primary">
+          <Plus size={19}/> Nova OS
+        </button>
+      </div>
+
+      <div className="surface p-3 flex gap-2 items-center">
+        <Search size={18} className="text-slate-400"/>
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          className="w-full outline-none"
+          placeholder="Buscar OS, cliente ou aparelho..."
+        />
+      </div>
+
+      <div className="space-y-3">
+
+        {filtered.length === 0 ? (
+          <div className="surface">
+            <Empty text="Nenhuma OS encontrada."/>
+          </div>
+        ) : (
+          filtered.map(o => (
+            <div
+              key={o.id}
+              onClick={() => onEdit(o.id)}
+              className="surface p-4 cursor-pointer hover:bg-slate-50 active:bg-slate-100 transition"
+            >
+
+              <div className="flex justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-sm text-blue-600 font-semibold">
+                    OS #{o.number}
+                  </p>
+
+                  <h3 className="font-bold">{o.client_name}</h3>
+
+                  <p className="text-sm text-slate-500">
+                    {o.device} • {dateBR(o.created_at)}
+                  </p>
+                </div>
+
+                <b>{money(o.total)}</b>
+              </div>
+
+              <select
+                value={o.status}
+                onClick={e => e.stopPropagation()}
+                onChange={e => onUpdate(o.id, {status:e.target.value})}
+                className="input"
+              >
+                <option value="pending">Aguardando</option>
+                <option value="in_progress">Em análise</option>
+                <option value="awaiting_part">Aguardando peça</option>
+                <option value="completed">Finalizado</option>
+                <option value="delivered">Entregue</option>
+                <option value="cancelled">Cancelado</option>
+              </select>
+
+              <div className="grid grid-cols-3 gap-2 mt-3">
+
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation()
+                    onEdit(o.id)
+                  }}
+                  className="py-2.5 border rounded-xl text-sm font-medium text-blue-600"
+                >
+                  <Pencil size={17} className="inline mr-1"/>
+                  Editar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation()
+                    whatsapp(o)
+                  }}
+                  className="py-2.5 border rounded-xl text-sm"
+                >
+                  <MessageCircle size={17} className="inline mr-1"/>
+                  WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation()
+                    printOrder(o, company, companyLogoUrl)
+                  }}
+                  className="py-2.5 border rounded-xl text-sm"
+                >
+                  <Printer size={17} className="inline mr-1"/>
+                  Imprimir
+                </button>
+
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
-  </div>
+  )
 }
-function Field({label,value,onChange,type='text',placeholder,required}) { return <label className="block"><span className="block text-sm font-medium mb-1">{label}</span><input required={required} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"/></label> }
 
-function Dashboard({orders,pending,completed,revenue,onNew}) {
-  return <div className="max-w-7xl mx-auto space-y-6">
-    <div className="flex flex-col sm:flex-row justify-between gap-4"><div><h1 className="text-2xl font-bold">Olá, Técnico 👋</h1><p className="text-slate-500">Resumo da sua assistência.</p></div><button onClick={onNew} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex gap-2 items-center font-medium"><Plus size={20}/> Nova OS</button></div>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-      <Stat title="OS em andamento" value={pending} icon={<Clock/>} cls="bg-yellow-50 text-yellow-700"/>
-      <Stat title="OS concluídas" value={completed} icon={<CheckCircle/>} cls="bg-green-50 text-green-700"/>
-      <Stat title="Faturamento concluído" value={money(revenue)} icon={<DollarSign/>} cls="bg-blue-50 text-blue-700"/>
+function whatsapp(o) {
+  const phone = (o.client_phone || '').replace(/\D/g, '')
+
+  const text =
+    `Olá, ${o.client_name || ''}! Sua OS #${o.number} - ${o.device} está com status: ${statusLabels[o.status]}.`
+
+  window.open(
+    `https://wa.me/55${phone}?text=${encodeURIComponent(text)}`,
+    '_blank'
+  )
+}
+
+function printOrder(o, company, logoUrl) {
+  const w = window.open('', '_blank')
+  if (!w) return
+
+  const companyName = company?.name || 'Assistência Técnica'
+  const brandColor = company?.primary_color || '#2563eb'
+
+  w.document.write(`
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>OS #${o.number} - ${companyName}</title>
+
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            padding: 32px;
+            color: #172033;
+          }
+
+          .header {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid ${brandColor};
+            margin-bottom: 25px;
+          }
+
+          .logo {
+            max-width: 95px;
+            max-height: 65px;
+            object-fit: contain;
+          }
+
+          h1 {
+            margin: 0;
+            font-size: 25px;
+          }
+
+          .sub {
+            color: #64748b;
+            margin-top: 5px;
+          }
+
+          .title {
+            font-size: 22px;
+            margin: 25px 0 18px;
+          }
+
+          .box {
+            border: 1px solid #dbe1e8;
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 15px;
+          }
+
+          p {
+            margin: 9px 0;
+          }
+
+          .total {
+            font-size: 20px;
+            font-weight: bold;
+          }
+
+          .assinatura {
+            margin-top: 60px;
+          }
+
+          .footer {
+            margin-top: 50px;
+            color: #94a3b8;
+            font-size: 10px;
+            text-align: center;
+          }
+        </style>
+      </head>
+
+      <body>
+
+        <div class="header">
+          ${logoUrl ? `<img class="logo" src="${logoUrl}">` : ''}
+
+          <div>
+            <h1>${companyName}</h1>
+            <div class="sub">Assistência Técnica</div>
+          </div>
+        </div>
+
+        <div class="title">
+          Ordem de Serviço #${o.number}
+        </div>
+
+        <div class="box">
+          <p><b>Cliente:</b> ${o.client_name || ''}</p>
+          <p><b>WhatsApp:</b> ${o.client_phone || ''}</p>
+          <p><b>Aparelho:</b> ${o.device || ''}</p>
+          <p><b>IMEI:</b> ${o.imei || ''}</p>
+        </div>
+
+        <div class="box">
+          <p><b>Defeito relatado:</b> ${o.issue || '-'}</p>
+          <p><b>Diagnóstico:</b> ${o.diagnosis || '-'}</p>
+          <p><b>Acessórios:</b> ${o.accessories || '-'}</p>
+          <p><b>Garantia:</b> ${o.warranty || '-'}</p>
+          <p><b>Status:</b> ${statusLabels[o.status] || o.status}</p>
+        </div>
+
+        <div class="box">
+          <p class="total">Total: ${money(o.total)}</p>
+        </div>
+
+        <div class="assinatura">
+          Assinatura do cliente:
+          _______________________________________
+        </div>
+
+        <div class="footer">
+          Documento gerado pelo sistema de gestão da assistência.
+        </div>
+
+        <script>
+          setTimeout(() => window.print(), 400)
+        </script>
+
+      </body>
+    </html>
+  `)
+
+  w.document.close()
+}
+
+function NewOrder({ clients, services, onSave, onCancel }) {
+  const [saving, setSaving] = useState(false)
+
+  const [f, setF] = useState({
+    client_id: '',
+    client_name: '',
+    client_phone: '',
+    device: '',
+    imei: '',
+    issue: '',
+    diagnosis: '',
+    password_notes: '',
+    accessories: '',
+    total: '',
+    warranty: '',
+    notes: '',
+    photos: []
+  })
+
+  function set(k, v) {
+    setF(prev => ({...prev, [k]:v}))
+  }
+
+  function selectClient(id) {
+    const c = clients.find(x => String(x.id) === String(id))
+
+    setF(prev => ({
+      ...prev,
+      client_id: id,
+      client_name: c?.name || '',
+      client_phone: c?.phone || ''
+    }))
+  }
+
+  function selectService(id) {
+    const s = services.find(x => String(x.id) === String(id))
+
+    if (s) {
+      setF(prev => ({
+        ...prev,
+        total: s.price,
+        warranty: s.warranty || ''
+      }))
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+
+    setSaving(true)
+    await onSave(f)
+    setSaving(false)
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto">
+
+      <button
+        onClick={onCancel}
+        className="mb-4 text-sm text-slate-500"
+      >
+        ← Voltar
+      </button>
+
+      <form onSubmit={submit} className="surface p-5 md:p-7 space-y-6">
+
+        <h1 className="text-2xl font-bold">Nova Ordem de Serviço</h1>
+
+        <div className="space-y-4">
+
+          <label>
+            <span className="label">Cliente cadastrado</span>
+            <select
+              value={f.client_id}
+              onChange={e => selectClient(e.target.value)}
+              className="input"
+            >
+              <option value="">Novo cliente / digite abaixo</option>
+              {clients.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <Field
+            label="Nome do cliente *"
+            value={f.client_name}
+            onChange={v => set('client_name',v)}
+            required
+          />
+
+          <Field
+            label="WhatsApp"
+            value={f.client_phone}
+            onChange={v => set('client_phone',v)}
+          />
+
+          <Field
+            label="Aparelho / modelo *"
+            value={f.device}
+            onChange={v => set('device',v)}
+            required
+          />
+
+          <Field
+            label="IMEI"
+            value={f.imei}
+            onChange={v => set('imei',v)}
+          />
+
+          <Field
+            label="Defeito relatado"
+            value={f.issue}
+            onChange={v => set('issue',v)}
+            area
+          />
+
+          <Field
+            label="Diagnóstico"
+            value={f.diagnosis}
+            onChange={v => set('diagnosis',v)}
+            area
+          />
+
+          <Field
+            label="Senha / padrão"
+            value={f.password_notes}
+            onChange={v => set('password_notes',v)}
+          />
+
+          <Field
+            label="Acessórios recebidos"
+            value={f.accessories}
+            onChange={v => set('accessories',v)}
+          />
+
+          <div>
+            <span className="label">Fotos do aparelho</span>
+
+            <label className="flex items-center justify-center gap-3 min-h-[58px] px-4 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-700 font-semibold active:bg-slate-100 cursor-pointer">
+              <Camera size={22} className="text-blue-600"/>
+              <span>Adicionar fotos</span>
+
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => set('photos', Array.from(e.target.files || []))}
+              />
+            </label>
+
+            <p className="text-xs text-slate-500 mt-2">
+              Use a câmera ou escolha imagens da galeria.
+            </p>
+
+            {f.photos.length > 0 && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                <p className="text-sm font-semibold text-blue-700">
+                  {f.photos.length} foto(s) selecionada(s)
+                </p>
+
+                <div className="mt-2 space-y-1">
+                  {f.photos.slice(0, 5).map((foto, index) => (
+                    <p key={index} className="text-xs text-slate-600 truncate">
+                      • {foto.name}
+                    </p>
+                  ))}
+
+                  {f.photos.length > 5 && (
+                    <p className="text-xs text-slate-500">
+                      + {f.photos.length - 5} outra(s)
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => set('photos', [])}
+                  className="mt-3 text-xs font-semibold text-red-600"
+                >
+                  Remover fotos selecionadas
+                </button>
+              </div>
+            )}
+          </div>
+
+          <label>
+            <span className="label">Serviço do catálogo</span>
+            <select
+              onChange={e => selectService(e.target.value)}
+              className="input"
+            >
+              <option value="">Selecione...</option>
+              {services.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name} — {money(s.price)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <Field
+            label="Valor total"
+            type="number"
+            value={f.total}
+            onChange={v => set('total',v)}
+          />
+
+          <Field
+            label="Garantia"
+            value={f.warranty}
+            onChange={v => set('warranty',v)}
+          />
+
+          <Field
+            label="Observações"
+            value={f.notes}
+            onChange={v => set('notes',v)}
+            area
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar OS'}
+        </button>
+      </form>
     </div>
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"><div className="p-6 border-b font-bold">Últimas OS</div>
-      {orders.length===0 ? <Empty text="Nenhuma OS cadastrada."/> : orders.slice(0,5).map(o=><div key={o.id} className="p-4 border-b last:border-0 flex flex-col sm:flex-row gap-3 sm:items-center justify-between"><div><b>{o.client_name || 'Cliente'}</b><p className="text-sm text-slate-500">OS #{o.number} • {o.device}</p></div><div className="flex items-center gap-3"><StatusBadge status={o.status}/><b>{money(o.total)}</b></div></div>)}
+  )
+}
+
+function Catalog({ services, onAdd, onUpdate, onDelete }) {
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-5">
+
+      <div className="flex justify-between items-center">
+        <div>
+          <p className="text-sm text-slate-500">Produtos e serviços</p>
+          <h1 className="text-2xl font-bold">Catálogo</h1>
+        </div>
+
+        <button
+          onClick={() => setOpen(true)}
+          className="btn-primary"
+        >
+          <Plus size={19}/> Novo
+        </button>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+
+        {services.map(s => (
+          <div key={s.id} className="surface p-5">
+
+            <div className="flex justify-between">
+              <div>
+                <h3 className="font-bold">{s.name}</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  {s.description || 'Sem descrição'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+
+                <button
+                  type="button"
+                  onClick={() => setEditing(s)}
+                  className="w-10 h-10 grid place-items-center rounded-xl bg-blue-50 text-blue-600 active:bg-blue-100"
+                  title="Editar serviço"
+                >
+                  <Pencil size={18}/>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onDelete(s.id)}
+                  className="w-10 h-10 grid place-items-center rounded-xl bg-red-50 text-red-500 active:bg-red-100"
+                  title="Excluir serviço"
+                >
+                  <Trash2 size={18}/>
+                </button>
+
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-between">
+              <b className="text-xl">{money(s.price)}</b>
+              <span className="text-sm text-slate-500">
+                {s.warranty || 'Sem garantia'}
+              </span>
+            </div>
+          </div>
+        ))}
+
+        {services.length === 0 && (
+          <div className="surface md:col-span-2">
+            <Empty text="Nenhum serviço cadastrado."/>
+          </div>
+        )}
+      </div>
+
+      {open && (
+        <ServiceModal
+          onSave={onAdd}
+          onClose={() => setOpen(false)}
+        />
+      )}
+
+      {editing && (
+        <EditServiceModal
+          service={editing}
+          onSave={onUpdate}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
-  </div>
+  )
 }
-function Stat({title,value,icon,cls}) { return <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center"><div><p className="text-sm text-slate-500">{title}</p><p className="text-2xl font-bold mt-1">{value}</p></div><div className={`p-3 rounded-xl ${cls}`}>{icon}</div></div> }
 
-function Orders({orders,onNew,onUpdate}) {
-  const [q,setQ]=useState('')
-  const filtered=orders.filter(o => `${o.number} ${o.client_name} ${o.device}`.toLowerCase().includes(q.toLowerCase()))
-  return <div className="max-w-7xl mx-auto space-y-5"><div className="flex flex-col sm:flex-row justify-between gap-3"><h1 className="text-2xl font-bold">Ordens de Serviço</h1><button onClick={onNew} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex gap-2 items-center"><Plus size={20}/> Nova OS</button></div>
-    <div className="bg-white rounded-2xl border shadow-sm p-3 flex items-center gap-2"><Search size={18} className="text-slate-400"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar OS, cliente ou aparelho..." className="outline-none w-full"/></div>
-    <div className="bg-white rounded-2xl border shadow-sm overflow-auto"><table className="w-full min-w-[850px] text-left"><thead className="bg-slate-50 text-sm text-slate-500"><tr>{['OS','Cliente','Aparelho','Status','Data','Total','Ações'].map(h=><th key={h} className="p-4">{h}</th>)}</tr></thead><tbody>{filtered.map(o=><tr key={o.id} className="border-t hover:bg-slate-50"><td className="p-4 font-bold text-blue-600">#{o.number}</td><td className="p-4">{o.client_name}</td><td className="p-4">{o.device}</td><td className="p-4"><select value={o.status} onChange={e=>onUpdate(o.id,{status:e.target.value})} className="border rounded-lg p-2 text-sm"><option value="pending">Aguardando</option><option value="in_progress">Em análise</option><option value="awaiting_part">Aguardando peça</option><option value="completed">Finalizado</option><option value="delivered">Entregue</option><option value="cancelled">Cancelado</option></select></td><td className="p-4 text-slate-500">{dateBR(o.created_at)}</td><td className="p-4 font-bold">{money(o.total)}</td><td className="p-4"><div className="flex gap-2"><button onClick={()=>whatsapp(o)} title="WhatsApp" className="p-2 rounded-lg hover:bg-green-50 text-green-600"><MessageCircle size={18}/></button><button onClick={()=>printOrder(o)} title="Imprimir" className="p-2 rounded-lg hover:bg-blue-50 text-blue-600"><Printer size={18}/></button></div></td></tr>)}</tbody></table>{filtered.length===0&&<Empty text="Nenhuma OS encontrada."/>}</div>
-  </div>
-}
-function whatsapp(o){ const text=`Olá, ${o.client_name || ''}! Sua OS #${o.number} - ${o.device} está com status: ${statusLabels[o.status] || o.status}.`; const phone=(o.client_phone||'').replace(/\D/g,''); window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,'_blank') }
-function printOrder(o){ const w=window.open('','_blank','width=800,height=900'); if(!w)return; w.document.write(`<html><head><title>OS #${o.number} - TechOS Pro</title><style>body{font-family:Arial;padding:35px}h1{color:#2563eb}hr{border:0;border-top:1px solid #ddd}p{margin:8px 0}</style></head><body><h1>TechOS Pro</h1><h2>Ordem de Serviço #${o.number}</h2><hr><p><b>Cliente:</b> ${o.client_name||''}</p><p><b>WhatsApp:</b> ${o.client_phone||''}</p><p><b>Aparelho:</b> ${o.device||''}</p><p><b>IMEI:</b> ${o.imei||''}</p><p><b>Defeito:</b> ${o.issue||''}</p><p><b>Diagnóstico:</b> ${o.diagnosis||''}</p><p><b>Acessórios:</b> ${o.accessories||''}</p><p><b>Status:</b> ${statusLabels[o.status]||o.status}</p><p><b>Total:</b> ${money(o.total)}</p><br><p>Assinatura do cliente: __________________________</p><script>window.print()</script></body></html>`); w.document.close() }
+function ServiceModal({ onSave, onClose }) {
+  const [saving, setSaving] = useState(false)
 
-function NewOrder({clients,services,onSave,onCancel}) {
-  const [f,setF]=useState({client_id:'',client_name:'',client_phone:'',device:'',imei:'',issue:'',diagnosis:'',password_notes:'',accessories:'',total:'',warranty:'',notes:''})
-  const [saving,setSaving]=useState(false)
-  function set(k,v){setF(x=>({...x,[k]:v}))}
-  function selectClient(id){ const c=clients.find(x=>String(x.id)===String(id)); setF(x=>({...x,client_id:id,client_name:c?.name||'',client_phone:c?.phone||''}))}
-  function selectService(id){ const s=services.find(x=>String(x.id)===String(id)); if(s) setF(x=>({...x,total:s.price,warranty:s.warranty||''}))}
-  async function submit(e){e.preventDefault();setSaving(true);await onSave(f);setSaving(false)}
-  return <div className="max-w-4xl mx-auto"><div className="flex items-center gap-3 mb-5"><button onClick={onCancel} className="p-2 hover:bg-slate-200 rounded-full"><X/></button><h1 className="text-2xl font-bold">Nova Ordem de Serviço</h1></div>
-    <form onSubmit={submit} className="bg-white rounded-2xl border shadow-sm p-5 md:p-8 space-y-7">
-      <Section title="1. Cliente"><div className="grid md:grid-cols-2 gap-4"><label className="block md:col-span-2"><span className="label">Cliente cadastrado</span><select value={f.client_id} onChange={e=>selectClient(e.target.value)} className="input"><option value="">Novo cliente / digite abaixo</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name} — {c.phone||''}</option>)}</select></label><Field label="Nome *" value={f.client_name} onChange={v=>set('client_name',v)} required/><Field label="WhatsApp" value={f.client_phone} onChange={v=>set('client_phone',v)} placeholder="(12) 99999-9999"/></div></Section>
-      <Section title="2. Aparelho"><div className="grid md:grid-cols-2 gap-4"><Field label="Modelo *" value={f.device} onChange={v=>set('device',v)} required/><Field label="IMEI" value={f.imei} onChange={v=>set('imei',v)}/><Field label="Defeito relatado" value={f.issue} onChange={v=>set('issue',v)} area/><Field label="Diagnóstico" value={f.diagnosis} onChange={v=>set('diagnosis',v)} area/></div></Section>
-      <Section title="3. Segurança / entrega"><div className="grid md:grid-cols-2 gap-4"><Field label="Senha / padrão" value={f.password_notes} onChange={v=>set('password_notes',v)}/><Field label="Acessórios recebidos" value={f.accessories} onChange={v=>set('accessories',v)}/></div></Section>
-      <Section title="4. Serviço e valores"><div className="grid md:grid-cols-3 gap-4"><label><span className="label">Serviço do catálogo</span><select onChange={e=>selectService(e.target.value)} className="input"><option value="">Selecione...</option>{services.map(s=><option key={s.id} value={s.id}>{s.name} — {money(s.price)}</option>)}</select></label><Field label="Valor total" type="number" step="0.01" value={f.total} onChange={v=>set('total',v)}/><Field label="Garantia" value={f.warranty} onChange={v=>set('warranty',v)}/></div><Field label="Observações" value={f.notes} onChange={v=>set('notes',v)} area/></Section>
-      <div className="flex justify-end gap-3"><button type="button" onClick={onCancel} className="px-5 py-3 rounded-xl border">Cancelar</button><button disabled={saving} className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold flex items-center gap-2"><Save size={18}/>{saving?'Salvando...':'Salvar OS'}</button></div>
-    </form>
-  </div>
-}
-function Section({title,children}){return <section><h2 className="text-sm uppercase tracking-wider text-slate-400 font-bold mb-4">{title}</h2>{children}</section>}
-function Field({label,value,onChange,type='text',placeholder='',required=false,area=false}){return <label className="block"><span className="label">{label}</span>{area?<textarea required={required} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="input min-h-24"/>:<input required={required} type={type} step={type==='number'?'0.01':undefined} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="input"/>}</label>}
+  const [f, setF] = useState({
+    name:'',
+    price:'',
+    warranty:'3 meses',
+    description:''
+  })
 
-function Clients({clients,onAdd,onDelete}) {
-  const [open,setOpen]=useState(false); const [f,setF]=useState({name:'',phone:'',email:'',notes:''})
-  async function save(e){e.preventDefault();if(await onAdd(f)){setF({name:'',phone:'',email:'',notes:''});setOpen(false)}}
-  return <div className="max-w-7xl mx-auto space-y-5"><div className="flex justify-between items-center"><h1 className="text-2xl font-bold">Clientes</h1><button onClick={()=>setOpen(true)} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex gap-2"><Plus size={20}/> Novo cliente</button></div>
-    {open&&<Modal title="Novo cliente" onClose={()=>setOpen(false)}><form onSubmit={save} className="space-y-4"><Field label="Nome *" value={f.name} onChange={v=>setF({...f,name:v})} required/><Field label="WhatsApp" value={f.phone} onChange={v=>setF({...f,phone:v})}/><Field label="E-mail" value={f.email} onChange={v=>setF({...f,email:v})}/><Field label="Observações" value={f.notes} onChange={v=>setF({...f,notes:v})} area/><button className="w-full bg-blue-600 text-white py-3 rounded-xl">Salvar</button></form></Modal>}
-    <div className="bg-white rounded-2xl border shadow-sm overflow-auto"><table className="w-full min-w-[650px]"><thead className="bg-slate-50 text-left text-sm text-slate-500"><tr><th className="p-4">Nome</th><th className="p-4">WhatsApp</th><th className="p-4">E-mail</th><th className="p-4">Cadastro</th><th className="p-4"></th></tr></thead><tbody>{clients.map(c=><tr key={c.id} className="border-t"><td className="p-4 font-semibold">{c.name}</td><td className="p-4">{c.phone||'-'}</td><td className="p-4">{c.email||'-'}</td><td className="p-4">{dateBR(c.created_at)}</td><td className="p-4 text-right"><button onClick={()=>onDelete(c.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={18}/></button></td></tr>)}</tbody></table>{clients.length===0&&<Empty text="Nenhum cliente cadastrado."/>}</div>
-  </div>
+  async function submit(e) {
+    e.preventDefault()
+    setSaving(true)
+
+    const ok = await onSave(f)
+
+    setSaving(false)
+
+    if (ok) onClose()
+  }
+
+  return (
+    <Modal title="Novo serviço" onClose={onClose}>
+
+      <form onSubmit={submit} className="space-y-4">
+
+        <Field
+          label="Nome *"
+          value={f.name}
+          onChange={v => setF({...f,name:v})}
+          required
+        />
+
+        <Field
+          label="Preço"
+          type="number"
+          value={f.price}
+          onChange={v => setF({...f,price:v})}
+        />
+
+        <Field
+          label="Garantia"
+          value={f.warranty}
+          onChange={v => setF({...f,warranty:v})}
+        />
+
+        <Field
+          label="Descrição"
+          value={f.description}
+          onChange={v => setF({...f,description:v})}
+          area
+        />
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar serviço'}
+        </button>
+      </form>
+    </Modal>
+  )
 }
-function Catalog({services,onAdd,onDelete}) {
-  const [open,setOpen]=useState(false); const [f,setF]=useState({name:'',price:'',warranty:'3 meses',description:''})
-  async function save(e){e.preventDefault();if(await onAdd(f)){setF({name:'',price:'',warranty:'3 meses',description:''});setOpen(false)}}
-  return <div className="max-w-7xl mx-auto space-y-5"><div className="flex justify-between items-center"><h1 className="text-2xl font-bold">Catálogo</h1><button onClick={()=>setOpen(true)} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex gap-2"><Plus size={20}/> Novo serviço</button></div>
-    {open&&<Modal title="Novo serviço" onClose={()=>setOpen(false)}><form onSubmit={save} className="space-y-4"><Field label="Nome *" value={f.name} onChange={v=>setF({...f,name:v})} required/><Field label="Preço" type="number" value={f.price} onChange={v=>setF({...f,price:v})}/><Field label="Garantia" value={f.warranty} onChange={v=>setF({...f,warranty:v})}/><Field label="Descrição" value={f.description} onChange={v=>setF({...f,description:v})} area/><button className="w-full bg-blue-600 text-white py-3 rounded-xl">Salvar</button></form></Modal>}
-    <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{services.map(s=><div key={s.id} className="bg-white border rounded-2xl p-5 shadow-sm"><div className="flex justify-between gap-3"><div><h3 className="font-bold">{s.name}</h3><p className="text-sm text-slate-500 mt-1">{s.description||'Sem descrição'}</p></div><button onClick={()=>onDelete(s.id)} className="text-red-500 p-2 h-fit hover:bg-red-50 rounded-lg"><Trash2 size={17}/></button></div><div className="mt-5 flex justify-between items-center"><b className="text-xl">{money(s.price)}</b><span className="text-xs bg-slate-100 px-2 py-1 rounded">{s.warranty||'Sem garantia'}</span></div></div>)}</div>{services.length===0&&<Empty text="Nenhum serviço cadastrado."/>}
-  </div>
+
+function EditServiceModal({ service, onSave, onClose }) {
+  const [saving, setSaving] = useState(false)
+
+  const [f, setF] = useState({
+    name: service.name || '',
+    price: service.price || '',
+    warranty: service.warranty || '',
+    description: service.description || ''
+  })
+
+  async function submit(e) {
+    e.preventDefault()
+    setSaving(true)
+
+    const ok = await onSave(service.id, f)
+
+    setSaving(false)
+
+    if (ok) onClose()
+  }
+
+  return (
+    <Modal title="Editar serviço" onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+
+        <Field
+          label="Nome do serviço *"
+          value={f.name}
+          onChange={v => setF({...f, name:v})}
+          required
+        />
+
+        <Field
+          label="Preço"
+          type="number"
+          value={f.price}
+          onChange={v => setF({...f, price:v})}
+        />
+
+        <Field
+          label="Garantia"
+          value={f.warranty}
+          onChange={v => setF({...f, warranty:v})}
+        />
+
+        <Field
+          label="Descrição"
+          value={f.description}
+          onChange={v => setF({...f, description:v})}
+          area
+        />
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar alterações'}
+        </button>
+
+      </form>
+    </Modal>
+  )
 }
-function SettingsView({company,profile,session,onSignOut}){return <div className="max-w-3xl mx-auto space-y-5"><h1 className="text-2xl font-bold">Configurações</h1><div className="bg-white border rounded-2xl p-6 space-y-5"><div><p className="text-sm text-slate-500">Empresa</p><p className="text-lg font-semibold">{company?.name||'TechOS Pro'}</p></div><div><p className="text-sm text-slate-500">Usuário</p><p className="font-medium">{profile?.full_name||'-'}</p><p className="text-sm text-slate-500">{session.user.email}</p></div><div><p className="text-sm text-slate-500">Perfil</p><p className="font-medium">{profile?.role||'admin'}</p></div><button onClick={onSignOut} className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2"><LogOut size={18}/> Sair da conta</button></div><div className="bg-blue-50 border border-blue-100 rounded-2xl p-5"><div className="flex gap-3"><ShieldCheck className="text-blue-600 shrink-0"/><div><b>TechOS Pro preparado para SaaS</b><p className="text-sm text-slate-600 mt-1">Os dados são isolados por empresa usando RLS no Supabase.</p></div></div></div></div>}
-function Modal({title,onClose,children}){return <div className="fixed inset-0 bg-black/40 z-[60] grid place-items-center p-4"><div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl"><div className="flex justify-between items-center mb-5"><h2 className="text-xl font-bold">{title}</h2><button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><X/></button></div>{children}</div></div>}
-function Empty({text}){return <div className="p-10 text-center text-slate-500">{text}</div>}
+
+
+function TeamView({
+  team,
+  invites,
+  company,
+  onCreateInvite,
+  onDeleteInvite
+}) {
+  const [email, setEmail] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const activeInvites = invites.filter(x => !x.used_at)
+
+  async function create(e) {
+    e.preventDefault()
+
+    setCreating(true)
+
+    const result = await onCreateInvite(email)
+
+    setCreating(false)
+
+    if (result) setEmail('')
+  }
+
+  const used = team.length
+  const max = Number(company?.max_users || 1)
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+
+      <div>
+        <p className="text-sm text-slate-500">Administração</p>
+        <h1 className="text-2xl font-bold">Equipe e Plano</h1>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-4">
+
+        <div className="surface p-5">
+          <p className="text-sm text-slate-500">Plano atual</p>
+          <p className="text-xl font-bold mt-1 capitalize">
+            {company?.plan || 'Starter'}
+          </p>
+        </div>
+
+        <div className="surface p-5">
+          <p className="text-sm text-slate-500">Usuários</p>
+          <p className="text-xl font-bold mt-1">
+            {used} / {max}
+          </p>
+        </div>
+
+        <div className="surface p-5">
+          <p className="text-sm text-slate-500">Assinatura</p>
+          <p className="text-xl font-bold mt-1 capitalize">
+            {company?.subscription_status === 'trial'
+              ? 'Período de teste'
+              : company?.subscription_status || '-'}
+          </p>
+
+          {company?.trial_ends_at && company?.subscription_status === 'trial' && (
+            <p className="text-xs text-slate-500 mt-1">
+              Até {dateBR(company.trial_ends_at)}
+            </p>
+          )}
+        </div>
+
+      </div>
+
+      <div className="surface p-5">
+
+        <h2 className="text-lg font-bold">Adicionar Técnico</h2>
+
+        <p className="text-sm text-slate-500 mt-1 mb-4">
+          Informe o e-mail do técnico. O sistema criará um código de convite.
+        </p>
+
+        <form onSubmit={create} className="flex flex-col sm:flex-row gap-3">
+
+          <div className="flex-1">
+            <Field
+              label="E-mail do técnico"
+              type="email"
+              value={email}
+              onChange={setEmail}
+              placeholder="tecnico@email.com"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={creating || used >= max}
+            className="btn-primary sm:self-end justify-center min-h-[50px]"
+          >
+            <Plus size={18}/>
+            {creating ? 'Criando...' : 'Criar convite'}
+          </button>
+
+        </form>
+
+        {used >= max && (
+          <div className="mt-4 bg-amber-50 border border-amber-200 text-amber-700 p-3 rounded-xl text-sm">
+            Limite de usuários do plano atingido.
+          </div>
+        )}
+      </div>
+
+      {activeInvites.length > 0 && (
+        <div className="surface overflow-hidden">
+
+          <div className="p-5 border-b">
+            <h2 className="font-bold">Convites pendentes</h2>
+          </div>
+
+          {activeInvites.map(invite => (
+            <div
+              key={invite.id}
+              className="p-4 border-b last:border-0"
+            >
+
+              <p className="font-semibold">{invite.email}</p>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Código do técnico
+              </p>
+
+              <div className="mt-2 space-y-2">
+
+                <code className="block w-full bg-slate-100 rounded-xl p-3 font-bold tracking-wider text-blue-700">
+                  {invite.invite_code}
+                </code>
+
+                <div className="grid grid-cols-2 gap-2">
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(invite.invite_code)
+                      } catch {}
+                    }}
+                    className="px-3 py-3 border rounded-xl text-sm font-medium"
+                  >
+                    Copiar código
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const mensagem =
+`Você foi convidado para acessar o sistema da assistência.
+
+E-mail do acesso:
+${invite.email}
+
+Código de convite:
+${invite.invite_code}
+
+Para criar sua conta, use exatamente este e-mail e informe o código acima no cadastro.
+
+Você terá acesso como Técnico.`
+
+                      try {
+                        if (navigator.share) {
+                          await navigator.share({
+                            title: 'Convite para equipe',
+                            text: mensagem
+                          })
+                        } else {
+                          window.open(
+                            `https://wa.me/?text=${encodeURIComponent(mensagem)}`,
+                            '_blank'
+                          )
+                        }
+                      } catch (erro) {
+                        if (erro?.name !== 'AbortError') {
+                          window.open(
+                            `https://wa.me/?text=${encodeURIComponent(mensagem)}`,
+                            '_blank'
+                          )
+                        }
+                      }
+                    }}
+                    className="px-3 py-3 rounded-xl text-sm font-semibold text-white"
+                    style={{backgroundColor: 'var(--brand-color, #2563eb)'}}
+                  >
+                    Compartilhar convite
+                  </button>
+
+                </div>
+
+              </div>
+
+              <div className="flex justify-between items-center mt-3">
+
+                <p className="text-xs text-slate-500">
+                  Expira em {dateBR(invite.expires_at)}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => onDeleteInvite(invite.id)}
+                  className="text-xs font-semibold text-red-600"
+                >
+                  Cancelar convite
+                </button>
+
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="surface overflow-hidden">
+
+        <div className="p-5 border-b">
+          <h2 className="font-bold">Usuários da assistência</h2>
+        </div>
+
+        {team.map(member => (
+          <div
+            key={member.id}
+            className="p-4 border-b last:border-0 flex items-center gap-3"
+          >
+
+            <div className="w-11 h-11 rounded-full bg-slate-900 text-white grid place-items-center font-bold">
+              {(member.full_name || 'U')[0].toUpperCase()}
+            </div>
+
+            <div className="flex-1">
+              <p className="font-semibold">
+                {member.full_name || 'Usuário'}
+              </p>
+
+              <p className="text-sm text-slate-500">
+                {member.role === 'supervisor'
+                  ? 'Supervisor'
+                  : 'Técnico'}
+              </p>
+            </div>
+
+            <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
+              member.role === 'supervisor'
+                ? 'bg-blue-50 text-blue-700'
+                : 'bg-slate-100 text-slate-600'
+            }`}>
+              {member.role === 'supervisor' ? 'Supervisor' : 'Técnico'}
+            </span>
+
+          </div>
+        ))}
+
+      </div>
+    </div>
+  )
+}
+
+function TechnicianSettings({
+  company,
+  profile,
+  session,
+  onSignOut
+}) {
+  return (
+    <div className="max-w-2xl mx-auto space-y-5">
+
+      <div>
+        <p className="text-sm text-slate-500">Meu acesso</p>
+        <h1 className="text-2xl font-bold">Perfil do Técnico</h1>
+      </div>
+
+      <div className="surface p-6 space-y-5">
+
+        <div>
+          <p className="text-xs text-slate-500">Assistência</p>
+          <p className="font-semibold text-lg">
+            {company?.name || '-'}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-xs text-slate-500">Nome</p>
+          <p className="font-semibold">
+            {profile?.full_name || '-'}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-xs text-slate-500">E-mail</p>
+          <p>{session.user.email}</p>
+        </div>
+
+        <div>
+          <p className="text-xs text-slate-500">Nível de acesso</p>
+
+          <span className="inline-block mt-1 bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-sm font-semibold">
+            Técnico
+          </span>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-sm text-blue-700">
+          Seu acesso é operacional. Alterações de catálogo, preços,
+          identidade visual e equipe são exclusivas do Supervisor.
+        </div>
+
+        <button
+          onClick={onSignOut}
+          className="w-full bg-red-600 text-white py-3 rounded-xl"
+        >
+          <LogOut size={18} className="inline mr-2"/>
+          Sair da conta
+        </button>
+
+      </div>
+    </div>
+  )
+}
+
+function SettingsView({
+  company,
+  profile,
+  session,
+  onSignOut,
+  companyLogoUrl,
+  onSaveCompany
+}) {
+  const [name, setName] = useState(company?.name || '')
+  const [systemName, setSystemName] = useState(
+    company?.system_name || company?.name || 'TechOS Pro'
+  )
+  const [primaryColor, setPrimaryColor] = useState(
+    company?.primary_color || '#2563eb'
+  )
+  const [logoFile, setLogoFile] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setName(company?.name || '')
+    setSystemName(company?.system_name || company?.name || 'TechOS Pro')
+    setPrimaryColor(company?.primary_color || '#2563eb')
+  }, [company?.id, company?.name, company?.system_name, company?.primary_color])
+
+  async function save(e) {
+    e.preventDefault()
+
+    if (!name.trim()) return
+
+    setSaving(true)
+
+    await onSaveCompany(
+      {
+        name,
+        system_name: systemName,
+        primary_color: primaryColor
+      },
+      logoFile
+    )
+
+    setLogoFile(null)
+    setSaving(false)
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-5">
+
+      <div>
+        <p className="text-sm text-slate-500">Personalização</p>
+        <h1 className="text-2xl font-bold">Identidade da assistência</h1>
+      </div>
+
+      <form onSubmit={save} className="surface p-6 space-y-5">
+
+        <div className="flex items-center gap-4">
+          {companyLogoUrl ? (
+            <img
+              src={companyLogoUrl}
+              alt="Logo"
+              className="w-20 h-20 object-contain rounded-2xl border bg-white p-2"
+            />
+          ) : (
+            <div
+              className="w-20 h-20 rounded-2xl grid place-items-center text-white"
+              style={{backgroundColor: primaryColor}}
+            >
+              <Wrench size={32}/>
+            </div>
+          )}
+
+          <div>
+            <p className="font-semibold">{name || 'Sua assistência'}</p>
+            <p className="text-sm text-slate-500">
+              Esta identidade aparecerá no sistema e nas OS.
+            </p>
+          </div>
+        </div>
+
+        <Field
+          label="Nome da assistência *"
+          value={name}
+          onChange={setName}
+          required
+        />
+
+        <Field
+          label="Nome exibido do sistema"
+          value={systemName}
+          onChange={setSystemName}
+          placeholder="Ex.: Reis OS, CellTech Gestão..."
+          required
+        />
+
+        <div>
+          <span className="label">Logo da assistência</span>
+
+          <label className="flex items-center justify-center min-h-[55px] border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 font-semibold cursor-pointer">
+            {logoFile ? logoFile.name : 'Selecionar logo'}
+
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={e => setLogoFile(e.target.files?.[0] || null)}
+            />
+          </label>
+
+          <p className="text-xs text-slate-500 mt-2">
+            PNG, JPG ou WEBP. Máximo de 3 MB.
+          </p>
+        </div>
+
+        <div>
+          <span className="label">Cor principal</span>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={e => setPrimaryColor(e.target.value)}
+              className="w-14 h-14 rounded-xl border p-1 bg-white"
+            />
+
+            <div>
+              <p className="font-medium">{primaryColor}</p>
+              <p className="text-xs text-slate-500">
+                Cor dos principais botões da assistência
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="btn-primary w-full justify-center"
+        >
+          <Save size={18}/>
+          {saving ? 'Salvando...' : 'Salvar identidade'}
+        </button>
+
+      </form>
+
+      <div className="surface p-6 space-y-4">
+        <div>
+          <p className="text-xs text-slate-500">Administrador</p>
+          <p className="font-semibold">{profile?.full_name || '-'}</p>
+          <p className="text-sm text-slate-500">{session.user.email}</p>
+        </div>
+
+        <button
+          onClick={onSignOut}
+          className="w-full bg-red-600 text-white py-3 rounded-xl"
+        >
+          <LogOut size={18} className="inline mr-2"/>
+          Sair da conta
+        </button>
+      </div>
+
+    </div>
+  )
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center sm:p-4">
+
+      <div className="bg-white w-full sm:max-w-lg rounded-t-[28px] sm:rounded-[28px] shadow-2xl max-h-[92vh] overflow-auto">
+
+        <div className="sticky top-0 bg-white flex justify-between items-center px-5 py-4 border-b z-10">
+
+          <h2 className="text-xl font-bold">{title}</h2>
+
+          <button
+            onClick={onClose}
+            className="p-2 rounded-full bg-slate-100"
+          >
+            <X size={20}/>
+          </button>
+        </div>
+
+        <div className="p-5">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Empty({ text }) {
+  return (
+    <div className="p-10 text-center text-slate-500">
+      {text}
+    </div>
+  )
+}

@@ -24,6 +24,7 @@ create table if not exists public.clients (
   name text not null,
   phone text,
   email text,
+  address text,
   notes text,
   created_at timestamptz not null default now()
 );
@@ -177,3 +178,14 @@ create trigger orders_set_company before insert on public.orders for each row ex
 
 -- Serviços iniciais de exemplo serão criados automaticamente por empresa
 -- quando o primeiro cadastro for feito, se desejado, pelo painel.
+
+
+-- Fotos anexadas às Ordens de Serviço
+create table if not exists public.order_photos (
+  id uuid primary key default gen_random_uuid(),
+  order_id bigint not null references public.orders(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  storage_path text not null,
+  file_name text,
+  created_at timestamptz not null default now()
+);
