@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { supabase } from './lib/supabaseClient'
 import InventoryView from './InventoryView'
+import OrderPartsSelector from './OrderPartsSelector'
 import * as XLSX from 'xlsx'
 
 const statusLabels = {
@@ -411,7 +412,16 @@ export default function App() {
         password_notes: form.password_notes || null,
         accessories: form.accessories || null,
         status: 'pending',
-        total: Number(form.total || 0),
+        labor_amount: Number(form.labor_amount || 0),
+        total:
+          Number(form.labor_amount || 0) +
+          (form.parts || []).reduce(
+            (sum, part) =>
+              sum +
+              Number(part.unit_price || 0) *
+              Number(part.quantity || 0),
+            0
+          ),
         warranty: form.warranty || null,
         notes: form.notes || null
       })
@@ -421,6 +431,48 @@ export default function App() {
     if (e) {
       setError(e.message)
       return false
+    }
+
+    if (form.parts?.length) {
+      for (const part of form.parts) {
+        const { error: partError } = await supabase.rpc(
+          'reserve_order_part',
+          {
+            p_order_id: data.id,
+            p_inventory_item_id: part.inventory_item_id,
+            p_quantity: Number(part.quantity || 0),
+            p_unit_price: Number(part.unit_price || 0)
+          }
+        )
+
+        if (partError) {
+          const { data: reservedRows } = await supabase
+            .from('order_parts')
+            .select('id')
+            .eq('order_id', data.id)
+            .eq('status', 'reserved')
+
+          for (const reserved of reservedRows || []) {
+            await supabase.rpc(
+              'release_order_part',
+              {
+                p_order_part_id: reserved.id
+              }
+            )
+          }
+
+          await supabase
+            .from('orders')
+            .delete()
+            .eq('id', data.id)
+
+          setError(
+            `Não foi possível reservar as peças: ${partError.message}`
+          )
+
+          return false
+        }
+      }
     }
 
     let fotosComErro = 0
@@ -1699,6 +1751,9 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
     password_notes: order.password_notes || '',
     accessories: order.accessories || '',
     status: order.status || 'pending',
+    labor_amount:
+      order.labor_amount ?? order.total ?? '',
+    parts_total: 0,
     total: order.total || '',
     warranty: order.warranty || '',
     notes: order.notes || ''
@@ -1719,13 +1774,36 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
     }))
   }
 
+  function setLaborAmount(value) {
+    setF(prev => ({
+      ...prev,
+      labor_amount: value,
+      total:
+        Number(value || 0) +
+        Number(prev.parts_total || 0)
+    }))
+  }
+
+  function setPartsTotal(value) {
+    setF(prev => ({
+      ...prev,
+      parts_total: Number(value || 0),
+      total:
+        Number(prev.labor_amount || 0) +
+        Number(value || 0)
+    }))
+  }
+
   function selectService(id) {
     const service = services.find(x => String(x.id) === String(id))
 
     if (service) {
       setF(prev => ({
         ...prev,
-        total: service.price,
+        labor_amount: service.price,
+        total:
+          Number(service.price || 0) +
+          Number(prev.parts_total || 0),
         warranty: service.warranty || ''
       }))
     }
@@ -1746,7 +1824,10 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
       password_notes: f.password_notes || null,
       accessories: f.accessories || null,
       status: f.status,
-      total: Number(f.total || 0),
+      labor_amount: Number(f.labor_amount || 0),
+      total:
+        Number(f.labor_amount || 0) +
+        Number(f.parts_total || 0),
       warranty: f.warranty || null,
       notes: f.notes || null
     })
@@ -1846,11 +1927,31 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
         </label>
 
         <Field
-          label="Valor total"
+          label="Mão de obra"
           type="number"
-          value={f.total}
-          onChange={v => set('total', v)}
+          value={f.labor_amount}
+          onChange={setLaborAmount}
         />
+
+        <OrderPartsSelector
+          orderId={order.id}
+          onTotalChange={setPartsTotal}
+        />
+
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex justify-between items-center gap-3">
+          <div>
+            <p className="text-sm text-emerald-700">
+              Total da OS
+            </p>
+            <p className="text-xs text-emerald-600">
+              Mão de obra + peças
+            </p>
+          </div>
+
+          <p className="text-xl font-bold text-emerald-700">
+            {money(f.total)}
+          </p>
+        </div>
 
         <Field
           label="Garantia"
@@ -2027,9 +2128,82 @@ function whatsapp(o) {
   )
 }
 
-function printOrder(o, company, logoUrl) {
+async function printOrder(o, company, logoUrl) {
   const w = window.open('', '_blank')
   if (!w) return
+
+  const { data: partsData, error: partsError } = await supabase
+    .from('order_parts')
+    .select(`
+      quantity,
+      unit_price,
+      status,
+      inventory_items (
+        name
+      )
+    `)
+    .eq('order_id', o.id)
+    .neq('status', 'cancelled')
+
+  if (partsError) {
+    console.error('Erro ao carregar peças da OS:', partsError)
+  }
+
+  const parts = partsError ? [] : (partsData || [])
+
+  const partsTotal = parts.reduce(
+    (total, part) =>
+      total +
+      Number(part.unit_price || 0) *
+      Number(part.quantity || 0),
+    0
+  )
+
+  const partsRows = parts
+    .map(part => {
+      const name =
+        part.inventory_items?.name || 'Peça'
+
+      return (
+        '<tr>' +
+          '<td>' + name + '</td>' +
+          '<td style="text-align:center">' +
+            Number(part.quantity || 0) +
+          '</td>' +
+          '<td style="text-align:right">' +
+            money(part.unit_price) +
+          '</td>' +
+          '<td style="text-align:right">' +
+            money(
+              Number(part.unit_price || 0) *
+              Number(part.quantity || 0)
+            ) +
+          '</td>' +
+        '</tr>'
+      )
+    })
+    .join('')
+
+  const partsHtml = parts.length
+    ? (
+        '<div class="box">' +
+          '<p><b>Peças / materiais</b></p>' +
+          '<table style="width:100%;border-collapse:collapse;margin-top:10px">' +
+            '<thead>' +
+              '<tr>' +
+                '<th style="text-align:left">Item</th>' +
+                '<th style="text-align:center">Qtd.</th>' +
+                '<th style="text-align:right">Unit.</th>' +
+                '<th style="text-align:right">Total</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' +
+              partsRows +
+            '</tbody>' +
+          '</table>' +
+        '</div>'
+      )
+    : ''
 
   const companyName = company?.name || 'Assistência Técnica'
   const brandColor = '#F4B63A'
@@ -2136,8 +2310,22 @@ function printOrder(o, company, logoUrl) {
           <p><b>Status:</b> ${statusLabels[o.status] || o.status}</p>
         </div>
 
+        ${partsHtml}
+
         <div class="box">
-          <p class="total">Total: ${money(o.total)}</p>
+          <p>
+            <b>Mão de obra:</b>
+            ${money(o.labor_amount)}
+          </p>
+
+          <p>
+            <b>Peças:</b>
+            ${money(partsTotal)}
+          </p>
+
+          <p class="total">
+            Total da OS: ${money(o.total)}
+          </p>
         </div>
 
         <div class="assinatura">
@@ -2173,6 +2361,9 @@ function NewOrder({ clients, services, onSave, onCancel }) {
     diagnosis: '',
     password_notes: '',
     accessories: '',
+    labor_amount: '',
+    parts_total: 0,
+    parts: [],
     total: '',
     warranty: '',
     notes: '',
@@ -2200,10 +2391,36 @@ function NewOrder({ clients, services, onSave, onCancel }) {
     if (s) {
       setF(prev => ({
         ...prev,
-        total: s.price,
+        labor_amount: s.price,
+        total: Number(s.price || 0) + Number(prev.parts_total || 0),
         warranty: s.warranty || ''
       }))
     }
+  }
+
+  function setLaborAmount(value) {
+    setF(prev => ({
+      ...prev,
+      labor_amount: value,
+      total: Number(value || 0) + Number(prev.parts_total || 0)
+    }))
+  }
+
+  function setParts(parts) {
+    setF(prev => ({
+      ...prev,
+      parts
+    }))
+  }
+
+  function setPartsTotal(value) {
+    setF(prev => ({
+      ...prev,
+      parts_total: Number(value || 0),
+      total:
+        Number(prev.labor_amount || 0) +
+        Number(value || 0)
+    }))
   }
 
   async function submit(e) {
@@ -2365,11 +2582,32 @@ function NewOrder({ clients, services, onSave, onCancel }) {
           </label>
 
           <Field
-            label="Valor total"
+            label="Mão de obra"
             type="number"
-            value={f.total}
-            onChange={v => set('total',v)}
+            value={f.labor_amount}
+            onChange={setLaborAmount}
           />
+
+          <OrderPartsSelector
+            value={f.parts}
+            onChange={setParts}
+            onTotalChange={setPartsTotal}
+          />
+
+          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex justify-between items-center gap-3">
+            <div>
+              <p className="text-sm text-emerald-700">
+                Total da OS
+              </p>
+              <p className="text-xs text-emerald-600">
+                Mão de obra + peças
+              </p>
+            </div>
+
+            <p className="text-xl font-bold text-emerald-700">
+              {money(f.total)}
+            </p>
+          </div>
 
           <Field
             label="Garantia"
@@ -2627,6 +2865,7 @@ function FinanceView({ orders, clients }) {
   const [payments, setPayments] = useState([])
   const [sessions, setSessions] = useState([])
   const [movements, setMovements] = useState([])
+  const [orderParts, setOrderParts] = useState([])
   const [loading, setLoading] = useState(true)
 
   const [openingAmount, setOpeningAmount] = useState('')
@@ -2660,7 +2899,7 @@ function FinanceView({ orders, clients }) {
   async function loadFinance() {
     setLoading(true)
 
-    const [p, c, m] = await Promise.all([
+    const [p, c, m, parts] = await Promise.all([
       supabase
         .from('payments')
         .select('*')
@@ -2675,15 +2914,22 @@ function FinanceView({ orders, clients }) {
         .from('cash_movements')
         .select('*')
         .order('created_at', { ascending: false })
+,
+
+      supabase
+        .from('order_parts')
+        .select('order_id, quantity, unit_cost, unit_price, status')
     ])
 
     if (p.error) alert(p.error.message)
     if (c.error) alert(c.error.message)
     if (m.error) alert(m.error.message)
+    if (parts.error) alert(parts.error.message)
 
     setPayments(p.data || [])
     setSessions(c.data || [])
     setMovements(m.data || [])
+    setOrderParts(parts.data || [])
     setLoading(false)
   }
 
@@ -2751,6 +2997,44 @@ function FinanceView({ orders, clients }) {
       cashIn -
       cashOut
     : 0
+
+  const completedOrders = orders.filter(
+    order =>
+      order.status === 'completed' ||
+      order.status === 'delivered'
+  )
+
+  const completedOrderIds = new Set(
+    completedOrders.map(order => Number(order.id))
+  )
+
+  const completedRevenue = completedOrders.reduce(
+    (total, order) =>
+      total + Number(order.total || 0),
+    0
+  )
+
+  const usedPartsCost = orderParts
+    .filter(
+      part =>
+        part.status === 'used' &&
+        completedOrderIds.has(Number(part.order_id))
+    )
+    .reduce(
+      (total, part) =>
+        total +
+        Number(part.unit_cost || 0) *
+        Number(part.quantity || 0),
+      0
+    )
+
+  const grossProfit =
+    completedRevenue - usedPartsCost
+
+  const grossMargin =
+    completedRevenue > 0
+      ? (grossProfit / completedRevenue) * 100
+      : 0
 
   async function openCash(e) {
     e.preventDefault()
@@ -3018,6 +3302,32 @@ function FinanceView({ orders, clients }) {
         <Stat
           title="Dinheiro"
           value={money(cashToday)}
+          icon={<DollarSign/>}
+        />
+      </div>
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat
+          title="Faturamento concluído"
+          value={money(completedRevenue)}
+          icon={<DollarSign/>}
+        />
+
+        <Stat
+          title="Custo de peças"
+          value={money(usedPartsCost)}
+          icon={<Package/>}
+        />
+
+        <Stat
+          title="Lucro bruto"
+          value={money(grossProfit)}
+          icon={<DollarSign/>}
+        />
+
+        <Stat
+          title="Margem bruta"
+          value={`${grossMargin.toFixed(1)}%`}
           icon={<DollarSign/>}
         />
       </div>
