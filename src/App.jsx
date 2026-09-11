@@ -590,8 +590,12 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0B1220] grid place-items-center text-white">
         <div className="text-center">
-          <Wrench size={42} className="mx-auto mb-3 text-blue-400"/>
-          Carregando TechOS Pro...
+          <img
+            src="/automatize-os.png"
+            alt="Automatize OS"
+            className="w-44 mx-auto mb-3 rounded-xl"
+          />
+          <p>Carregando Automatize OS...</p>
         </div>
       </div>
     )
@@ -649,10 +653,10 @@ export default function App() {
 
           <div className="min-w-0">
             <h1 className="text-lg font-bold truncate">
-              {company?.system_name || company?.name || 'TechOS Pro'}
+              {company?.name || 'Assistência Técnica'}
             </h1>
             <p className="text-[11px] text-slate-400">
-              Powered by TechOS Pro
+              Powered by Automatize OS
             </p>
           </div>
         </div>
@@ -672,7 +676,7 @@ export default function App() {
         <div className="m-4 p-4 bg-white/5 rounded-2xl">
           <p className="text-xs text-slate-400">Empresa</p>
           <p className="font-semibold truncate mt-1">
-            {company?.name || 'TechOS Pro'}
+            {company?.name || 'Automatize OS'}
           </p>
         </div>
       </aside>
@@ -895,12 +899,16 @@ function NavItem({ icon, label, active, onClick }) {
 }
 
 function AuthScreen() {
-  const [register, setRegister] = useState(false)
-  const [email, setEmail] = useState('')
+  const inviteParams = new URLSearchParams(window.location.search)
+  const initialInviteCode = inviteParams.get('invite') || ''
+  const initialInviteEmail = inviteParams.get('email') || ''
+
+  const [register, setRegister] = useState(Boolean(initialInviteCode))
+  const [email, setEmail] = useState(initialInviteEmail)
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
+  const [inviteCode, setInviteCode] = useState(initialInviteCode)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
@@ -951,19 +959,18 @@ function AuthScreen() {
 
       <div className="w-full max-w-md bg-white rounded-[28px] shadow-2xl p-7">
 
-        <div className="flex items-center gap-3 mb-7">
-          <div className="bg-blue-600 text-white p-3 rounded-2xl">
-            <Wrench/>
+        <div className="mb-7 text-center">
+          <div className="bg-black rounded-2xl p-3 mb-4">
+            <img
+              src="/automatize-os.png"
+              alt="Automatize OS"
+              className="w-full max-w-[240px] mx-auto rounded-xl"
+            />
           </div>
 
-          <div>
-            <h1 className="text-2xl font-bold">
-              TechOS<span className="text-blue-600">Pro</span>
-            </h1>
-            <p className="text-sm text-slate-500">
-              Gestão para assistência técnica
-            </p>
-          </div>
+          <p className="text-sm text-slate-500">
+            Gestão para assistência técnica
+          </p>
         </div>
 
         {err && (
@@ -2542,8 +2549,14 @@ function TeamView({
                   <button
                     type="button"
                     onClick={async () => {
+                      const linkConvite =
+                        `${window.location.origin}/?invite=${encodeURIComponent(invite.invite_code)}&email=${encodeURIComponent(invite.email)}`
+
                       const mensagem =
-`Você foi convidado para acessar o sistema da assistência.
+`Você foi convidado para acessar ${company?.name || 'a assistência'} no Automatize OS.
+
+Acesse o link abaixo para criar sua conta:
+${linkConvite}
 
 E-mail do acesso:
 ${invite.email}
@@ -2551,9 +2564,9 @@ ${invite.email}
 Código de convite:
 ${invite.invite_code}
 
-Para criar sua conta, use exatamente este e-mail e informe o código acima no cadastro.
+O link já abre o cadastro com o e-mail e código preenchidos.
 
-Você terá acesso como Técnico.`
+Seu acesso será criado como Técnico.`
 
                       try {
                         if (navigator.share) {
@@ -2721,7 +2734,7 @@ function SettingsView({
 }) {
   const [name, setName] = useState(company?.name || '')
   const [systemName, setSystemName] = useState(
-    company?.system_name || company?.name || 'TechOS Pro'
+    company?.name || 'Assistência Técnica'
   )
   const [primaryColor, setPrimaryColor] = useState(
     company?.primary_color || '#2563eb'
@@ -2731,7 +2744,7 @@ function SettingsView({
 
   useEffect(() => {
     setName(company?.name || '')
-    setSystemName(company?.system_name || company?.name || 'TechOS Pro')
+    setSystemName(company?.name || 'Assistência Técnica')
     setPrimaryColor(company?.primary_color || '#2563eb')
   }, [company?.id, company?.name, company?.system_name, company?.primary_color])
 
