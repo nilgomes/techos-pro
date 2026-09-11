@@ -3,9 +3,10 @@ import {
   Home, FileText, Users, Settings, Plus, Search, Wrench,
   CheckCircle, Clock, Menu, X, DollarSign, MessageCircle,
   Printer, Package, Trash2, LogOut, RefreshCw, AlertCircle,
-  Save, ChevronRight, Pencil, Camera
+  Save, ChevronRight, Pencil, Camera, Upload, Download
 } from 'lucide-react'
 import { supabase } from './lib/supabaseClient'
+import * as XLSX from 'xlsx'
 
 const statusLabels = {
   pending: 'Aguardando',
@@ -242,6 +243,37 @@ export default function App() {
 
     setClients(prev => [data, ...prev])
     success('Cliente salvo com sucesso.')
+    return true
+  }
+
+  async function importClients(items) {
+    setError('')
+
+    if (!items?.length) {
+      setError('Nenhum cliente válido encontrado na planilha.')
+      return false
+    }
+
+    const payload = items.map(item => ({
+      name: item.name?.trim(),
+      phone: item.phone?.trim() || null,
+      email: item.email?.trim() || null,
+      address: item.address?.trim() || null,
+      notes: item.notes?.trim() || null
+    })).filter(item => item.name)
+
+    const { data, error: e } = await supabase
+      .from('clients')
+      .insert(payload)
+      .select()
+
+    if (e) {
+      setError(e.message)
+      return false
+    }
+
+    setClients(prev => [...(data || []), ...prev])
+    success(`${data?.length || 0} cliente(s) importado(s) com sucesso.`)
     return true
   }
 
@@ -810,6 +842,7 @@ export default function App() {
               clients={clients}
               orders={orders}
               onAdd={addClient}
+              onImport={importClients}
               onUpdate={updateClient}
               onDelete={deleteClient}
             />
@@ -1159,22 +1192,199 @@ function Stat({ title, value, icon }) {
   )
 }
 
-function Clients({ clients, orders, onAdd, onUpdate, onDelete }) {
+function Clients({ clients, orders, onAdd, onImport, onUpdate, onDelete }) {
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState(null)
+  const [importing, setImporting] = useState(false)
+
+  function normalizeHeader(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+  }
+
+  function text(value) {
+    if (value === null || value === undefined) return ''
+    return String(value).trim()
+  }
+
+  async function handleImport(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('A planilha deve ter no máximo 5 MB.')
+      return
+    }
+
+    setImporting(true)
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+
+      const firstSheet = workbook.SheetNames[0]
+
+      if (!firstSheet) {
+        throw new Error('A planilha está vazia.')
+      }
+
+      const rawRows = XLSX.utils.sheet_to_json(
+        workbook.Sheets[firstSheet],
+        { defval: '' }
+      )
+
+      if (!rawRows.length) {
+        throw new Error('Nenhuma linha encontrada na planilha.')
+      }
+
+      if (rawRows.length > 2000) {
+        throw new Error('Importe no máximo 2.000 clientes por vez.')
+      }
+
+      const rows = rawRows.map(row => {
+        const normalized = {}
+
+        Object.entries(row).forEach(([key, value]) => {
+          normalized[normalizeHeader(key)] = value
+        })
+
+        const get = (...keys) => {
+          for (const key of keys) {
+            const value = normalized[normalizeHeader(key)]
+            if (value !== undefined && value !== null && text(value)) {
+              return text(value)
+            }
+          }
+          return ''
+        }
+
+        return {
+          name: get('Nome', 'Cliente', 'Name'),
+          phone: get(
+            'WhatsApp',
+            'Telefone',
+            'Celular',
+            'Fone',
+            'Phone'
+          ),
+          email: get('E-mail', 'Email'),
+          address: get(
+            'Endereço',
+            'Endereco',
+            'Endereço completo',
+            'Endereco completo',
+            'Address'
+          ),
+          notes: get(
+            'Observações',
+            'Observacoes',
+            'Observação',
+            'Observacao',
+            'Obs',
+            'Notes'
+          )
+        }
+      }).filter(row => row.name)
+
+      if (!rows.length) {
+        throw new Error(
+          'Não encontrei a coluna Nome. Use uma coluna chamada Nome ou Cliente.'
+        )
+      }
+
+      const ok = await onImport(rows)
+
+      if (ok) {
+        alert(`${rows.length} cliente(s) importado(s) com sucesso.`)
+      }
+    } catch (error) {
+      alert(error.message || 'Não foi possível importar a planilha.')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  function exportClients() {
+    if (!clients.length) {
+      alert('Não há clientes para exportar.')
+      return
+    }
+
+    const rows = clients.map(client => ({
+      'Nome': client.name || '',
+      'WhatsApp': client.phone || '',
+      'E-mail': client.email || '',
+      'Endereço': client.address || '',
+      'Observações': client.notes || ''
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+
+    worksheet['!cols'] = [
+      { wch: 30 },
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 45 },
+      { wch: 45 }
+    ]
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes')
+
+    const date = new Date().toISOString().slice(0, 10)
+
+    XLSX.writeFile(
+      workbook,
+      `clientes-automatize-os-${date}.xlsx`
+    )
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
 
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <p className="text-sm text-slate-500">Cadastros</p>
           <h1 className="text-2xl font-bold">Clientes</h1>
         </div>
 
-        <button onClick={() => setOpen(true)} className="btn-primary">
-          <Plus size={19}/> Novo
-        </button>
+        <div className="flex flex-wrap gap-2">
+
+          <label className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border bg-white font-medium cursor-pointer hover:bg-slate-50">
+            <Upload size={18}/>
+            {importing ? 'Importando...' : 'Importar'}
+
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImport}
+              disabled={importing}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={exportClients}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border bg-white font-medium hover:bg-slate-50"
+          >
+            <Download size={18}/>
+            Exportar
+          </button>
+
+          <button
+            onClick={() => setOpen(true)}
+            className="btn-primary"
+          >
+            <Plus size={19}/> Novo
+          </button>
+
+        </div>
       </div>
 
       <div className="surface overflow-hidden">
