@@ -2786,16 +2786,12 @@ function SettingsView({
           />
 
           <div>
-            <p className="text-xs text-slate-400 uppercase tracking-wider">
-              Marca da plataforma
-            </p>
-
             <h2 className="text-xl font-bold text-[#F4B63A]">
               Automatize OS
             </h2>
 
             <p className="text-sm text-slate-400 mt-1">
-              Marca oficial e fixa do sistema.
+              Gestão para assistência técnica
             </p>
           </div>
         </div>
@@ -2865,13 +2861,6 @@ function SettingsView({
               Nova logo: {logoFile.name}
             </p>
           )}
-        </div>
-
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-          <p className="text-sm text-amber-800">
-            A marca Automatize OS permanece fixa. O nome e a logo acima
-            identificam exclusivamente a sua assistência dentro do sistema.
-          </p>
         </div>
 
         <button
