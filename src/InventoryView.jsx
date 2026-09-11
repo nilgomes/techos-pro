@@ -213,6 +213,203 @@ export default function InventoryView() {
         </div>
 
       </div>
+      {showForm && (
+        <form
+          onSubmit={saveItem}
+          className="surface p-5 md:p-6 space-y-4"
+        >
+          <div>
+            <h2 className="text-lg font-bold">
+              Cadastrar novo item
+            </h2>
+
+            <p className="text-sm text-slate-500">
+              Cadastre a peça e o estoque inicial.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+
+            <label>
+              <span className="label">Nome da peça *</span>
+              <input
+                className="input"
+                value={form.name}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    name: e.target.value
+                  }))
+                }
+                required
+                placeholder="Ex.: Tela iPhone 11"
+              />
+            </label>
+
+            <label>
+              <span className="label">Código / SKU</span>
+              <input
+                className="input"
+                value={form.sku}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    sku: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Categoria</span>
+              <input
+                className="input"
+                value={form.category}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    category: e.target.value
+                  }))
+                }
+                placeholder="Tela, bateria, conector..."
+              />
+            </label>
+
+            <label>
+              <span className="label">Modelos compatíveis</span>
+              <input
+                className="input"
+                value={form.compatible_models}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    compatible_models: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Fornecedor</span>
+              <input
+                className="input"
+                value={form.supplier}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    supplier: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Quantidade inicial</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={form.quantity}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    quantity: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Estoque mínimo</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={form.minimum_stock}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    minimum_stock: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Custo unitário</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.cost_price}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    cost_price: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span className="label">Preço de venda</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.sale_price}
+                onChange={e =>
+                  setForm(prev => ({
+                    ...prev,
+                    sale_price: e.target.value
+                  }))
+                }
+              />
+            </label>
+
+          </div>
+
+          <label className="block">
+            <span className="label">Observações</span>
+
+            <textarea
+              className="input min-h-24"
+              value={form.notes}
+              onChange={e =>
+                setForm(prev => ({
+                  ...prev,
+                  notes: e.target.value
+                }))
+              }
+            />
+          </label>
+
+          <div className="flex gap-2 justify-end">
+
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-3 border rounded-xl font-semibold"
+            >
+              Cancelar
+            </button>
+
+            <button
+              type="submit"
+              className="btn-primary"
+            >
+              Salvar item
+            </button>
+
+          </div>
+
+        </form>
+      )}
+
       <div className="space-y-3">
 
         {loading && (
@@ -337,5 +534,4 @@ export default function InventoryView() {
 
     </div>
   )
-}0
-
+}
