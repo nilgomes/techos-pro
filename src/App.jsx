@@ -3,11 +3,12 @@ import {
   Home, FileText, Users, Settings, Plus, Search, Wrench,
   CheckCircle, Clock, Menu, X, DollarSign, MessageCircle,
   Printer, Package, Trash2, LogOut, RefreshCw, AlertCircle,
-  Save, ChevronRight, Pencil, Camera, Upload, Download
+  Save, ChevronRight, Pencil, Camera, Upload, Download, ShieldCheck
 } from 'lucide-react'
 import { supabase } from './lib/supabaseClient'
 import InventoryView from './InventoryView'
 import OrderPartsSelector from './OrderPartsSelector'
+import MasterAdminView from './MasterAdminView'
 import * as XLSX from 'xlsx'
 
 const statusLabels = {
@@ -101,6 +102,10 @@ export default function App() {
   const [clientProfileId, setClientProfileId] = useState(null)
   const [selectedOrderId, setSelectedOrderId] = useState(null)
 
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
+  const [supportContext, setSupportContext] = useState(null)
+  const [adminReady, setAdminReady] = useState(false)
+
   function success(text) {
     setNotice(text)
     setTimeout(() => setNotice(''), 3000)
@@ -121,8 +126,73 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (session?.user?.id) loadAll()
+    if (session?.user?.id) {
+      bootstrapSession()
+    } else {
+      setAdminReady(false)
+      setIsPlatformAdmin(false)
+      setSupportContext(null)
+    }
   }, [session?.user?.id])
+
+  async function bootstrapSession() {
+    setAdminReady(false)
+
+    try {
+      const {
+        data: adminFlag,
+        error: adminError
+      } = await supabase.rpc(
+        'is_platform_admin'
+      )
+
+      if (adminError) throw adminError
+
+      const master =
+        Boolean(adminFlag)
+
+      setIsPlatformAdmin(master)
+
+      let context = null
+
+      if (master) {
+        const {
+          data: contextData,
+          error: contextError
+        } = await supabase.rpc(
+          'admin_get_support_context'
+        )
+
+        if (contextError) {
+          throw contextError
+        }
+
+        context =
+          Array.isArray(contextData)
+            ? contextData[0] || null
+            : contextData || null
+
+        setSupportContext(context)
+      } else {
+        setSupportContext(null)
+      }
+
+      await loadAll({
+        platformAdmin: master,
+        supportCompany: context
+      })
+
+    } catch (e) {
+      console.error(e)
+
+      setError(
+        e.message ||
+        'Erro ao iniciar o sistema.'
+      )
+    } finally {
+      setAdminReady(true)
+    }
+  }
 
   async function loadCompanyLogo(companyData) {
     if (!companyData?.logo_path) {
@@ -143,19 +213,51 @@ export default function App() {
     setCompanyLogoUrl(data?.signedUrl || '')
   }
 
-  async function loadAll() {
+  async function loadAll(options = {}) {
     if (!session?.user) return
+
+    const platformAdmin =
+      options.platformAdmin ??
+      isPlatformAdmin
+
+    const effectiveSupport =
+      Object.prototype.hasOwnProperty.call(
+        options,
+        'supportCompany'
+      )
+        ? options.supportCompany
+        : supportContext
 
     setLoading(true)
     setError('')
 
     try {
-      const [p, c, s, o] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single(),
+      const profileRequest =
+        platformAdmin &&
+        effectiveSupport?.company_id
+          ? Promise.resolve({
+              data: {
+                id: session.user.id,
+                company_id:
+                  effectiveSupport.company_id,
+                full_name:
+                  'Administrador Master',
+                role: 'supervisor'
+              },
+              error: null
+            })
+          : supabase
+              .from('profiles')
+              .select('*')
+              .eq(
+                'id',
+                session.user.id
+              )
+              .single()
+
+      const [p, c, s, o] =
+        await Promise.all([
+          profileRequest,
 
         supabase
           .from('clients')
@@ -665,6 +767,63 @@ export default function App() {
     success('Convite cancelado.')
   }
 
+  async function enterSupport(companyData) {
+    setError('')
+
+    const {
+      data,
+      error
+    } = await supabase.rpc(
+      'admin_set_support_company',
+      {
+        p_company_id:
+          companyData.company_id
+      }
+    )
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    const context =
+      Array.isArray(data)
+        ? data[0] || null
+        : data || null
+
+    setSupportContext(context)
+    setTab('dashboard')
+    setMobileMenu(false)
+
+    await loadAll({
+      platformAdmin: true,
+      supportCompany: context
+    })
+  }
+
+  async function exitSupport() {
+    setError('')
+
+    const { error } =
+      await supabase.rpc(
+        'admin_clear_support_company'
+      )
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setSupportContext(null)
+    setTab('master')
+    setMobileMenu(false)
+
+    await loadAll({
+      platformAdmin: true,
+      supportCompany: null
+    })
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
   }
@@ -686,6 +845,21 @@ export default function App() {
 
   if (!session) return <AuthScreen />
 
+  if (!adminReady) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] grid place-items-center text-white">
+        <div className="text-center">
+          <img
+            src="/automatize-os.png"
+            alt="TechOS Pro"
+            className="w-44 mx-auto mb-3 rounded-xl"
+          />
+          <p>Preparando TechOS Pro...</p>
+        </div>
+      </div>
+    )
+  }
+
   const pending = orders.filter(o =>
     ['pending', 'in_progress', 'awaiting_part'].includes(o.status)
   ).length
@@ -702,6 +876,11 @@ export default function App() {
 
   const nav = [
     ['dashboard', <Home size={19}/>, isSupervisor ? 'Painel Supervisor' : 'Painel Técnico'],
+    ...(isPlatformAdmin ? [[
+      'master',
+      <ShieldCheck size={19}/>,
+      'Painel Master'
+    ]] : []),
     ['orders', <FileText size={19}/>, 'Ordens de Serviço'],
     ['clients', <Users size={19}/>, 'Clientes'],
     ...(isSupervisor ? [
@@ -810,6 +989,32 @@ export default function App() {
           </div>
         </header>
 
+        {isPlatformAdmin && supportContext && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 md:px-7 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-amber-700">
+                MODO SUPORTE
+              </p>
+
+              <p className="text-sm text-amber-900">
+                Você está acessando:
+                {' '}
+                <b>
+                  {supportContext.company_name}
+                </b>
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={exitSupport}
+              className="px-4 py-2 bg-amber-600 text-white rounded-xl text-sm font-semibold"
+            >
+              Voltar ao Painel Master
+            </button>
+          </div>
+        )}
+
         {mobileMenu && (
           <div className="md:hidden absolute top-16 left-0 right-0 z-50 bg-[#0B1220] p-4 space-y-1 shadow-2xl">
             {nav.map(([id, icon, label]) => (
@@ -857,6 +1062,12 @@ export default function App() {
             <p className="text-sm text-slate-500 mb-3">
               Sincronizando...
             </p>
+          )}
+
+          {tab === 'master' && isPlatformAdmin && (
+            <MasterAdminView
+              onEnterSupport={enterSupport}
+            />
           )}
 
           {tab === 'dashboard' && (
