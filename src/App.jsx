@@ -504,8 +504,6 @@ export default function App() {
         .from('companies')
         .update({
           name: form.name.trim(),
-          system_name: form.system_name?.trim() || form.name.trim(),
-          primary_color: form.primary_color || '#2563eb',
           logo_path: logoPath
         })
         .eq('id', company.id)
@@ -631,7 +629,7 @@ export default function App() {
   return (
     <div
       className="flex h-screen bg-[#F6F7F9] text-slate-800"
-      style={{ '--brand-color': company?.primary_color || '#2563eb' }}
+      style={{ '--brand-color': '#F4B63A' }}
     >
 
       <aside className="hidden md:flex flex-col w-64 bg-[#0B1220] text-white">
@@ -1810,7 +1808,7 @@ function printOrder(o, company, logoUrl) {
   if (!w) return
 
   const companyName = company?.name || 'Assistência Técnica'
-  const brandColor = company?.primary_color || '#2563eb'
+  const brandColor = '#F4B63A'
 
   w.document.write(`
     <html>
@@ -2733,20 +2731,26 @@ function SettingsView({
   onSaveCompany
 }) {
   const [name, setName] = useState(company?.name || '')
-  const [systemName, setSystemName] = useState(
-    company?.name || 'Assistência Técnica'
-  )
-  const [primaryColor, setPrimaryColor] = useState(
-    company?.primary_color || '#2563eb'
-  )
   const [logoFile, setLogoFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setName(company?.name || '')
-    setSystemName(company?.name || 'Assistência Técnica')
-    setPrimaryColor(company?.primary_color || '#2563eb')
-  }, [company?.id, company?.name, company?.system_name, company?.primary_color])
+    setLogoFile(null)
+  }, [company?.id, company?.name])
+
+  useEffect(() => {
+    if (!logoFile) {
+      setPreviewUrl('')
+      return
+    }
+
+    const url = URL.createObjectURL(logoFile)
+    setPreviewUrl(url)
+
+    return () => URL.revokeObjectURL(url)
+  }, [logoFile])
 
   async function save(e) {
     e.preventDefault()
@@ -2755,105 +2759,119 @@ function SettingsView({
 
     setSaving(true)
 
-    await onSaveCompany(
-      {
-        name,
-        system_name: systemName,
-        primary_color: primaryColor
-      },
+    const ok = await onSaveCompany(
+      { name },
       logoFile
     )
 
-    setLogoFile(null)
     setSaving(false)
+
+    if (ok) setLogoFile(null)
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="max-w-3xl mx-auto space-y-6">
 
       <div>
         <p className="text-sm text-slate-500">Personalização</p>
-        <h1 className="text-2xl font-bold">Identidade da assistência</h1>
+        <h1 className="text-2xl font-bold">Configurações da assistência</h1>
       </div>
 
-      <form onSubmit={save} className="surface p-6 space-y-5">
-
+      <div className="bg-[#0B1220] rounded-3xl p-5 text-white">
         <div className="flex items-center gap-4">
-          {companyLogoUrl ? (
-            <img
-              src={companyLogoUrl}
-              alt="Logo"
-              className="w-20 h-20 object-contain rounded-2xl border bg-white p-2"
-            />
-          ) : (
-            <div
-              className="w-20 h-20 rounded-2xl grid place-items-center text-white"
-              style={{backgroundColor: primaryColor}}
-            >
-              <Wrench size={32}/>
-            </div>
-          )}
+          <img
+            src="/automatize-os.png"
+            alt="Automatize OS"
+            className="w-24 h-24 object-contain rounded-2xl"
+          />
 
           <div>
-            <p className="font-semibold">{name || 'Sua assistência'}</p>
-            <p className="text-sm text-slate-500">
-              Esta identidade aparecerá no sistema e nas OS.
+            <p className="text-xs text-slate-400 uppercase tracking-wider">
+              Marca da plataforma
+            </p>
+
+            <h2 className="text-xl font-bold text-[#F4B63A]">
+              Automatize OS
+            </h2>
+
+            <p className="text-sm text-slate-400 mt-1">
+              Marca oficial e fixa do sistema.
             </p>
           </div>
         </div>
+      </div>
+
+      <form onSubmit={save} className="surface p-5 space-y-5">
+
+        <div>
+          <h2 className="font-bold text-lg">
+            Identidade da sua assistência
+          </h2>
+
+          <p className="text-sm text-slate-500 mt-1">
+            Personalize apenas o nome e a logo da sua empresa.
+          </p>
+        </div>
 
         <Field
-          label="Nome da assistência *"
+          label="Nome da assistência"
           value={name}
           onChange={setName}
-          required
-        />
-
-        <Field
-          label="Nome exibido do sistema"
-          value={systemName}
-          onChange={setSystemName}
-          placeholder="Ex.: Reis OS, CellTech Gestão..."
+          placeholder="Ex.: Nil Cell Assistência Técnica"
           required
         />
 
         <div>
           <span className="label">Logo da assistência</span>
 
-          <label className="flex items-center justify-center min-h-[55px] border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 font-semibold cursor-pointer">
-            {logoFile ? logoFile.name : 'Selecionar logo'}
+          <div className="flex items-center gap-4 mt-2">
 
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              className="hidden"
-              onChange={e => setLogoFile(e.target.files?.[0] || null)}
-            />
-          </label>
+            {(previewUrl || companyLogoUrl) ? (
+              <img
+                src={previewUrl || companyLogoUrl}
+                alt="Logo da assistência"
+                className="w-20 h-20 rounded-2xl border bg-white object-contain p-2"
+              />
+            ) : (
+              <div className="w-20 h-20 rounded-2xl border bg-slate-50 grid place-items-center text-slate-400">
+                <Wrench size={28}/>
+              </div>
+            )}
 
-          <p className="text-xs text-slate-500 mt-2">
-            PNG, JPG ou WEBP. Máximo de 3 MB.
-          </p>
+            <label className="flex-1">
+              <div className="border border-dashed border-slate-300 rounded-2xl p-4 text-center cursor-pointer hover:bg-slate-50">
+                <Camera size={22} className="mx-auto mb-2 text-slate-500"/>
+
+                <p className="text-sm font-semibold">
+                  Escolher logo
+                </p>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  PNG, JPG ou WEBP • até 3 MB
+                </p>
+              </div>
+
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={e => setLogoFile(e.target.files?.[0] || null)}
+              />
+            </label>
+          </div>
+
+          {logoFile && (
+            <p className="text-xs text-slate-500 mt-2">
+              Nova logo: {logoFile.name}
+            </p>
+          )}
         </div>
 
-        <div>
-          <span className="label">Cor principal</span>
-
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={primaryColor}
-              onChange={e => setPrimaryColor(e.target.value)}
-              className="w-14 h-14 rounded-xl border p-1 bg-white"
-            />
-
-            <div>
-              <p className="font-medium">{primaryColor}</p>
-              <p className="text-xs text-slate-500">
-                Cor dos principais botões da assistência
-              </p>
-            </div>
-          </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <p className="text-sm text-amber-800">
+            A marca Automatize OS permanece fixa. O nome e a logo acima
+            identificam exclusivamente a sua assistência dentro do sistema.
+          </p>
         </div>
 
         <button
@@ -2864,19 +2882,31 @@ function SettingsView({
           <Save size={18}/>
           {saving ? 'Salvando...' : 'Salvar identidade'}
         </button>
-
       </form>
 
-      <div className="surface p-6 space-y-4">
-        <div>
-          <p className="text-xs text-slate-500">Administrador</p>
-          <p className="font-semibold">{profile?.full_name || '-'}</p>
-          <p className="text-sm text-slate-500">{session.user.email}</p>
+      <div className="surface p-5">
+        <h2 className="font-bold mb-4">Minha conta</h2>
+
+        <div className="space-y-3 text-sm">
+          <div>
+            <p className="text-xs text-slate-500">E-mail</p>
+            <p>{session?.user?.email || '-'}</p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-500">Acesso</p>
+            <p>
+              {profile?.role === 'supervisor'
+                ? 'Supervisor'
+                : 'Técnico'}
+            </p>
+          </div>
         </div>
 
         <button
+          type="button"
           onClick={onSignOut}
-          className="w-full bg-red-600 text-white py-3 rounded-xl"
+          className="w-full mt-5 py-3 border border-red-200 text-red-600 rounded-xl font-medium"
         >
           <LogOut size={18} className="inline mr-2"/>
           Sair da conta
