@@ -653,6 +653,7 @@ export default function App() {
     ['clients', <Users size={19}/>, 'Clientes'],
     ...(isSupervisor ? [
       ['catalog', <Package size={19}/>, 'Catálogo'],
+      ['finance', <DollarSign size={19}/>, 'Financeiro'],
       ['team', <Users size={19}/>, 'Equipe']
     ] : []),
     ['settings', <Settings size={19}/>, 'Minha conta']
@@ -854,6 +855,13 @@ export default function App() {
               onAdd={addService}
               onUpdate={updateService}
               onDelete={deleteService}
+            />
+          )}
+
+          {tab === 'finance' && isSupervisor && (
+            <FinanceView
+              orders={orders}
+              clients={clients}
             />
           )}
 
@@ -2604,6 +2612,769 @@ function EditServiceModal({ service, onSave, onClose }) {
 
       </form>
     </Modal>
+  )
+}
+
+
+
+function FinanceView({ orders, clients }) {
+  const [payments, setPayments] = useState([])
+  const [sessions, setSessions] = useState([])
+  const [movements, setMovements] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const [openingAmount, setOpeningAmount] = useState('')
+  const [openingNotes, setOpeningNotes] = useState('')
+
+  const [closingAmount, setClosingAmount] = useState('')
+  const [closingNotes, setClosingNotes] = useState('')
+
+  const [paymentForm, setPaymentForm] = useState({
+    order_id: '',
+    amount: '',
+    method: 'pix',
+    notes: ''
+  })
+
+  const [movementForm, setMovementForm] = useState({
+    type: 'out',
+    amount: '',
+    description: ''
+  })
+
+  const methodLabels = {
+    pix: 'Pix',
+    cash: 'Dinheiro',
+    debit_card: 'Cartão débito',
+    credit_card: 'Cartão crédito',
+    bank_transfer: 'Transferência',
+    other: 'Outro'
+  }
+
+  async function loadFinance() {
+    setLoading(true)
+
+    const [p, c, m] = await Promise.all([
+      supabase
+        .from('payments')
+        .select('*')
+        .order('paid_at', { ascending: false }),
+
+      supabase
+        .from('cash_sessions')
+        .select('*')
+        .order('opened_at', { ascending: false }),
+
+      supabase
+        .from('cash_movements')
+        .select('*')
+        .order('created_at', { ascending: false })
+    ])
+
+    if (p.error) alert(p.error.message)
+    if (c.error) alert(c.error.message)
+    if (m.error) alert(m.error.message)
+
+    setPayments(p.data || [])
+    setSessions(c.data || [])
+    setMovements(m.data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadFinance()
+  }, [])
+
+  const openSession = sessions.find(s => s.status === 'open')
+
+  const todayKey = new Date().toLocaleDateString('en-CA')
+
+  const todayPayments = payments.filter(p =>
+    p.status === 'paid' &&
+    new Date(p.paid_at).toLocaleDateString('en-CA') === todayKey
+  )
+
+  const sum = items =>
+    items.reduce((total, item) => total + Number(item.amount || 0), 0)
+
+  const receivedToday = sum(todayPayments)
+
+  const pixToday = sum(
+    todayPayments.filter(p => p.method === 'pix')
+  )
+
+  const cardToday = sum(
+    todayPayments.filter(p =>
+      p.method === 'debit_card' ||
+      p.method === 'credit_card'
+    )
+  )
+
+  const cashToday = sum(
+    todayPayments.filter(p => p.method === 'cash')
+  )
+
+  const sessionPayments = openSession
+    ? payments.filter(p =>
+        p.status === 'paid' &&
+        Number(p.cash_session_id) === Number(openSession.id)
+      )
+    : []
+
+  const sessionMovements = openSession
+    ? movements.filter(m =>
+        Number(m.cash_session_id) === Number(openSession.id)
+      )
+    : []
+
+  const cashPayments = sum(
+    sessionPayments.filter(p => p.method === 'cash')
+  )
+
+  const cashIn = sum(
+    sessionMovements.filter(m => m.type === 'in')
+  )
+
+  const cashOut = sum(
+    sessionMovements.filter(m => m.type === 'out')
+  )
+
+  const expectedCash = openSession
+    ? Number(openSession.opening_amount || 0) +
+      cashPayments +
+      cashIn -
+      cashOut
+    : 0
+
+  async function openCash(e) {
+    e.preventDefault()
+
+    const value = Number(openingAmount || 0)
+
+    if (value < 0) return
+
+    const { error } = await supabase
+      .from('cash_sessions')
+      .insert({
+        opening_amount: value,
+        notes: openingNotes.trim() || null
+      })
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setOpeningAmount('')
+    setOpeningNotes('')
+    await loadFinance()
+  }
+
+  async function closeCash(e) {
+    e.preventDefault()
+
+    if (!openSession) return
+
+    if (closingAmount === '') {
+      alert('Informe o valor contado no caixa.')
+      return
+    }
+
+    const counted = Number(closingAmount)
+
+    if (counted < 0) return
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser()
+
+    const { error } = await supabase
+      .from('cash_sessions')
+      .update({
+        status: 'closed',
+        closed_by: user?.id || null,
+        closed_at: new Date().toISOString(),
+        closing_amount: counted,
+        expected_amount: expectedCash,
+        difference: counted - expectedCash,
+        notes: closingNotes.trim() || openSession.notes || null
+      })
+      .eq('id', openSession.id)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setClosingAmount('')
+    setClosingNotes('')
+    await loadFinance()
+  }
+
+  function selectOrder(value) {
+    const order = orders.find(o => String(o.id) === String(value))
+
+    let amount = ''
+
+    if (order) {
+      const alreadyPaid = payments
+        .filter(p =>
+          p.status === 'paid' &&
+          String(p.order_id) === String(order.id)
+        )
+        .reduce((t, p) => t + Number(p.amount || 0), 0)
+
+      amount = String(
+        Math.max(0, Number(order.total || 0) - alreadyPaid)
+      )
+    }
+
+    setPaymentForm(prev => ({
+      ...prev,
+      order_id: value,
+      amount
+    }))
+  }
+
+  async function savePayment(e) {
+    e.preventDefault()
+
+    if (!openSession) {
+      alert('Abra o caixa antes de registrar pagamentos.')
+      return
+    }
+
+    const amount = Number(paymentForm.amount || 0)
+
+    if (amount <= 0) {
+      alert('Informe um valor válido.')
+      return
+    }
+
+    const order = orders.find(
+      o => String(o.id) === String(paymentForm.order_id)
+    )
+
+    const { error } = await supabase
+      .from('payments')
+      .insert({
+        order_id: order?.id || null,
+        client_id: order?.client_id || null,
+        cash_session_id: openSession.id,
+        amount,
+        method: paymentForm.method,
+        notes: paymentForm.notes.trim() || null
+      })
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setPaymentForm({
+      order_id: '',
+      amount: '',
+      method: 'pix',
+      notes: ''
+    })
+
+    await loadFinance()
+  }
+
+  async function saveMovement(e) {
+    e.preventDefault()
+
+    if (!openSession) {
+      alert('Abra o caixa primeiro.')
+      return
+    }
+
+    const amount = Number(movementForm.amount || 0)
+
+    if (amount <= 0 || !movementForm.description.trim()) {
+      alert('Informe valor e descrição.')
+      return
+    }
+
+    const { error } = await supabase
+      .from('cash_movements')
+      .insert({
+        cash_session_id: openSession.id,
+        type: movementForm.type,
+        amount,
+        description: movementForm.description.trim()
+      })
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setMovementForm({
+      type: 'out',
+      amount: '',
+      description: ''
+    })
+
+    await loadFinance()
+  }
+
+  function exportReport() {
+    if (!payments.length) {
+      alert('Ainda não existem pagamentos.')
+      return
+    }
+
+    const rows = payments.map(payment => {
+      const order = orders.find(
+        o => String(o.id) === String(payment.order_id)
+      )
+
+      const client =
+        clients.find(
+          c => String(c.id) === String(payment.client_id)
+        )
+
+      return {
+        Data: new Date(payment.paid_at).toLocaleString('pt-BR'),
+        OS: order ? `#${order.number}` : '',
+        Cliente: order?.client_name || client?.name || '',
+        'Forma de pagamento':
+          methodLabels[payment.method] || payment.method,
+        Valor: Number(payment.amount || 0),
+        Situação:
+          payment.status === 'paid' ? 'Pago' : 'Cancelado',
+        Observações: payment.notes || ''
+      }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 30 },
+      { wch: 22 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 40 }
+    ]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Financeiro')
+
+    const date = new Date().toISOString().slice(0, 10)
+
+    XLSX.writeFile(
+      wb,
+      `financeiro-automatize-os-${date}.xlsx`
+    )
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-500">Controle financeiro</p>
+          <h1 className="text-2xl font-bold">Financeiro</h1>
+        </div>
+
+        <button
+          type="button"
+          onClick={exportReport}
+          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border bg-white font-medium"
+        >
+          <Download size={18}/>
+          Exportar relatório
+        </button>
+      </div>
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat
+          title="Recebido hoje"
+          value={money(receivedToday)}
+          icon={<DollarSign/>}
+        />
+
+        <Stat
+          title="Pix"
+          value={money(pixToday)}
+          icon={<DollarSign/>}
+        />
+
+        <Stat
+          title="Cartão"
+          value={money(cardToday)}
+          icon={<DollarSign/>}
+        />
+
+        <Stat
+          title="Dinheiro"
+          value={money(cashToday)}
+          icon={<DollarSign/>}
+        />
+      </div>
+
+      {!openSession ? (
+        <form
+          onSubmit={openCash}
+          className="surface p-5 space-y-4"
+        >
+          <div>
+            <h2 className="text-lg font-bold">Abrir caixa</h2>
+            <p className="text-sm text-slate-500">
+              Informe o valor inicial disponível no caixa.
+            </p>
+          </div>
+
+          <Field
+            label="Valor de abertura"
+            type="number"
+            value={openingAmount}
+            onChange={setOpeningAmount}
+            placeholder="0,00"
+          />
+
+          <Field
+            label="Observações"
+            value={openingNotes}
+            onChange={setOpeningNotes}
+            area
+          />
+
+          <button
+            type="submit"
+            className="btn-primary w-full justify-center"
+          >
+            Abrir caixa
+          </button>
+        </form>
+      ) : (
+        <div className="surface p-5 space-y-4">
+          <div className="flex justify-between items-start gap-3">
+            <div>
+              <p className="text-sm text-slate-500">Situação</p>
+              <h2 className="text-xl font-bold text-emerald-600">
+                Caixa aberto
+              </h2>
+            </div>
+
+            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-sm font-semibold">
+              Aberto
+            </span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-xs text-slate-500">Abertura</p>
+              <b>{money(openSession.opening_amount)}</b>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-xs text-slate-500">Dinheiro recebido</p>
+              <b>{money(cashPayments)}</b>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-xs text-slate-500">Saídas</p>
+              <b>{money(cashOut)}</b>
+            </div>
+
+            <div className="bg-amber-50 rounded-xl p-4">
+              <p className="text-xs text-amber-700">
+                Esperado no caixa
+              </p>
+              <b>{money(expectedCash)}</b>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {openSession && (
+        <>
+          <div className="grid lg:grid-cols-2 gap-5">
+
+            <form
+              onSubmit={savePayment}
+              className="surface p-5 space-y-4"
+            >
+              <div>
+                <h2 className="font-bold text-lg">
+                  Registrar pagamento
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Vincule o recebimento a uma ordem de serviço.
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="label">Ordem de serviço</span>
+                <select
+                  className="input"
+                  value={paymentForm.order_id}
+                  onChange={e => selectOrder(e.target.value)}
+                >
+                  <option value="">Pagamento sem OS</option>
+
+                  {orders
+                    .filter(o => o.status !== 'cancelled')
+                    .map(order => (
+                      <option key={order.id} value={order.id}>
+                        OS #{order.number} - {order.client_name || 'Cliente'}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <Field
+                label="Valor"
+                type="number"
+                value={paymentForm.amount}
+                onChange={value =>
+                  setPaymentForm(prev => ({
+                    ...prev,
+                    amount: value
+                  }))
+                }
+                required
+              />
+
+              <label className="block">
+                <span className="label">Forma de pagamento</span>
+                <select
+                  className="input"
+                  value={paymentForm.method}
+                  onChange={e =>
+                    setPaymentForm(prev => ({
+                      ...prev,
+                      method: e.target.value
+                    }))
+                  }
+                >
+                  <option value="pix">Pix</option>
+                  <option value="cash">Dinheiro</option>
+                  <option value="debit_card">Cartão débito</option>
+                  <option value="credit_card">Cartão crédito</option>
+                  <option value="bank_transfer">Transferência</option>
+                  <option value="other">Outro</option>
+                </select>
+              </label>
+
+              <Field
+                label="Observações"
+                value={paymentForm.notes}
+                onChange={value =>
+                  setPaymentForm(prev => ({
+                    ...prev,
+                    notes: value
+                  }))
+                }
+              />
+
+              <button
+                type="submit"
+                className="btn-primary w-full justify-center"
+              >
+                <Save size={18}/>
+                Registrar pagamento
+              </button>
+            </form>
+
+            <form
+              onSubmit={saveMovement}
+              className="surface p-5 space-y-4"
+            >
+              <div>
+                <h2 className="font-bold text-lg">
+                  Movimento de caixa
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Registre suprimentos ou retiradas em dinheiro.
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="label">Tipo</span>
+                <select
+                  className="input"
+                  value={movementForm.type}
+                  onChange={e =>
+                    setMovementForm(prev => ({
+                      ...prev,
+                      type: e.target.value
+                    }))
+                  }
+                >
+                  <option value="in">Entrada</option>
+                  <option value="out">Saída / retirada</option>
+                </select>
+              </label>
+
+              <Field
+                label="Valor"
+                type="number"
+                value={movementForm.amount}
+                onChange={value =>
+                  setMovementForm(prev => ({
+                    ...prev,
+                    amount: value
+                  }))
+                }
+                required
+              />
+
+              <Field
+                label="Descrição"
+                value={movementForm.description}
+                onChange={value =>
+                  setMovementForm(prev => ({
+                    ...prev,
+                    description: value
+                  }))
+                }
+                placeholder="Ex.: compra de material"
+                required
+              />
+
+              <button
+                type="submit"
+                className="w-full py-3 rounded-xl border font-semibold"
+              >
+                Registrar movimento
+              </button>
+            </form>
+
+          </div>
+
+          <form
+            onSubmit={closeCash}
+            className="surface p-5 space-y-4"
+          >
+            <div>
+              <h2 className="font-bold text-lg">
+                Fechamento de caixa
+              </h2>
+
+              <p className="text-sm text-slate-500">
+                Sistema espera {money(expectedCash)} em dinheiro.
+              </p>
+            </div>
+
+            <Field
+              label="Valor contado no caixa"
+              type="number"
+              value={closingAmount}
+              onChange={setClosingAmount}
+              required
+            />
+
+            <Field
+              label="Observações do fechamento"
+              value={closingNotes}
+              onChange={setClosingNotes}
+              area
+            />
+
+            <button
+              type="submit"
+              className="w-full py-3 rounded-xl bg-slate-900 text-white font-semibold"
+            >
+              Fechar caixa
+            </button>
+          </form>
+        </>
+      )}
+
+      <div className="surface overflow-hidden">
+        <div className="p-5 border-b">
+          <h2 className="font-bold">Últimos pagamentos</h2>
+        </div>
+
+        {loading ? (
+          <div className="p-5 text-slate-500">Carregando...</div>
+        ) : payments.length === 0 ? (
+          <Empty text="Nenhum pagamento registrado."/>
+        ) : (
+          payments.slice(0, 30).map(payment => {
+            const order = orders.find(
+              o => String(o.id) === String(payment.order_id)
+            )
+
+            const client = clients.find(
+              c => String(c.id) === String(payment.client_id)
+            )
+
+            return (
+              <div
+                key={payment.id}
+                className="p-4 border-b last:border-0 flex justify-between gap-3"
+              >
+                <div>
+                  <p className="font-semibold">
+                    {order?.client_name || client?.name || 'Pagamento'}
+                  </p>
+
+                  <p className="text-sm text-slate-500">
+                    {order ? `OS #${order.number} • ` : ''}
+                    {methodLabels[payment.method] || payment.method}
+                    {' • '}
+                    {new Date(payment.paid_at).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+
+                <b className="whitespace-nowrap">
+                  {money(payment.amount)}
+                </b>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {sessions.filter(s => s.status === 'closed').length > 0 && (
+        <div className="surface overflow-hidden">
+          <div className="p-5 border-b">
+            <h2 className="font-bold">Histórico de caixas</h2>
+          </div>
+
+          {sessions
+            .filter(s => s.status === 'closed')
+            .slice(0, 10)
+            .map(session => (
+              <div
+                key={session.id}
+                className="p-4 border-b last:border-0"
+              >
+                <div className="flex justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">
+                      {dateBR(session.opened_at)}
+                    </p>
+
+                    <p className="text-sm text-slate-500">
+                      Esperado {money(session.expected_amount)}
+                      {' • '}
+                      Contado {money(session.closing_amount)}
+                    </p>
+                  </div>
+
+                  <span
+                    className={
+                      Number(session.difference || 0) === 0
+                        ? 'text-emerald-600 font-semibold'
+                        : 'text-amber-600 font-semibold'
+                    }
+                  >
+                    Dif. {money(session.difference)}
+                  </span>
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
+
+    </div>
   )
 }
 
