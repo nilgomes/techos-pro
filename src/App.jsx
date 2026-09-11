@@ -6,6 +6,7 @@ import {
   Save, ChevronRight, Pencil, Camera, Upload, Download
 } from 'lucide-react'
 import { supabase } from './lib/supabaseClient'
+import InventoryView from './InventoryView'
 import * as XLSX from 'xlsx'
 
 const statusLabels = {
@@ -653,6 +654,7 @@ export default function App() {
     ['clients', <Users size={19}/>, 'Clientes'],
     ...(isSupervisor ? [
       ['catalog', <Package size={19}/>, 'Catálogo'],
+      ['inventory', <Package size={19}/>, 'Estoque'],
       ['finance', <DollarSign size={19}/>, 'Financeiro'],
       ['team', <Users size={19}/>, 'Equipe']
     ] : []),
@@ -856,6 +858,10 @@ export default function App() {
               onUpdate={updateService}
               onDelete={deleteService}
             />
+          )}
+
+          {tab === 'inventory' && isSupervisor && (
+            <InventoryView />
           )}
 
           {tab === 'finance' && isSupervisor && (
