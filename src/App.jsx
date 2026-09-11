@@ -37,6 +37,147 @@ const money = v =>
 
 const dateBR = v => v ? new Date(v).toLocaleDateString('pt-BR') : '-'
 
+function getSubscriptionAccess(company) {
+  if (!company) {
+    return {
+      active: true,
+      status: '',
+      label: '',
+      endsAt: null
+    }
+  }
+
+  const status =
+    String(company.subscription_status || '').toLowerCase()
+
+  const endsAt =
+    status === 'trial'
+      ? company.trial_ends_at
+      : status === 'active'
+        ? company.subscription_ends_at
+        : null
+
+  const dateValid =
+    Boolean(endsAt) &&
+    new Date(endsAt).getTime() > Date.now()
+
+  const active =
+    ['trial', 'active'].includes(status) &&
+    dateValid
+
+  const labels = {
+    trial: 'Período de teste expirado',
+    active: 'Assinatura expirada',
+    past_due: 'Pagamento pendente',
+    expired: 'Assinatura expirada',
+    cancelled: 'Assinatura cancelada',
+    suspended: 'Acesso bloqueado'
+  }
+
+  return {
+    active,
+    status,
+    endsAt,
+    label:
+      labels[status] ||
+      'Assinatura inativa'
+  }
+}
+
+function SubscriptionLockedScreen({
+  company,
+  onSignOut
+}) {
+  const access =
+    getSubscriptionAccess(company)
+
+  return (
+    <div className="min-h-screen bg-[#0B1220] flex items-center justify-center p-5">
+
+      <div className="w-full max-w-lg bg-white rounded-3xl p-7 shadow-2xl">
+
+        <div className="w-14 h-14 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mb-5">
+          <AlertCircle size={30}/>
+        </div>
+
+        <p className="text-sm font-bold text-red-600">
+          ACESSO SUSPENSO
+        </p>
+
+        <h1 className="text-2xl font-bold mt-1">
+          {access.label}
+        </h1>
+
+        <p className="text-slate-500 mt-3">
+          O acesso da assistência
+          {' '}
+          <b className="text-slate-700">
+            {company?.name}
+          </b>
+          {' '}
+          está temporariamente bloqueado.
+        </p>
+
+        <div className="bg-slate-50 rounded-2xl p-4 mt-6 space-y-3">
+
+          <div className="flex justify-between gap-4">
+            <span className="text-slate-500">
+              Plano
+            </span>
+
+            <b className="capitalize">
+              {company?.plan || 'Starter'}
+            </b>
+          </div>
+
+          {access.endsAt && (
+            <div className="flex justify-between gap-4">
+              <span className="text-slate-500">
+                Vencimento
+              </span>
+
+              <b>
+                {dateBR(access.endsAt)}
+              </b>
+            </div>
+          )}
+
+        </div>
+
+        <div className="mt-5 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+          Regularize sua assinatura com a administração
+          do TechOS Pro para continuar utilizando o sistema.
+          Seus dados permanecem armazenados.
+        </div>
+
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="btn-primary w-full justify-center mt-6"
+        >
+          <RefreshCw size={18}/>
+          Já regularizei — verificar acesso
+        </button>
+
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="w-full py-3 border rounded-xl font-semibold mt-3"
+        >
+          <LogOut size={18} className="inline mr-2"/>
+          Sair
+        </button>
+
+        <p className="text-xs text-center text-slate-400 mt-6">
+          Powered by TechOS Pro
+        </p>
+
+      </div>
+
+    </div>
+  )
+}
+
 function Field({
   label,
   value,
@@ -857,6 +998,22 @@ export default function App() {
           <p>Preparando TechOS Pro...</p>
         </div>
       </div>
+    )
+  }
+
+  const subscriptionAccess =
+    getSubscriptionAccess(company)
+
+  if (
+    company &&
+    !isPlatformAdmin &&
+    !subscriptionAccess.active
+  ) {
+    return (
+      <SubscriptionLockedScreen
+        company={company}
+        onSignOut={signOut}
+      />
     )
   }
 
