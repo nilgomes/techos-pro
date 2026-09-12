@@ -37,6 +37,7 @@ export default function MasterAdminView({
   const [companies, setCompanies] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [dashboardFilter, setDashboardFilter] = useState('all')
   const [selected, setSelected] = useState(null)
   const [users, setUsers] = useState([])
   const [audit, setAudit] = useState([])
@@ -334,10 +335,25 @@ Equipe Automatize OS`
     const q =
       search.trim().toLowerCase()
 
-    if (!q) return companies
+    return companies.filter(c => {
+      const matchesDashboard =
+        dashboardFilter === 'all'
+          ? true
+          : dashboardFilter === 'active'
+            ? Boolean(c.access_active)
+            : dashboardFilter === 'expiring'
+              ? Boolean(c.access_active) &&
+                c.days_remaining !== null &&
+                c.days_remaining >= 0 &&
+                c.days_remaining <= 7
+              : dashboardFilter === 'blocked'
+                ? !c.access_active
+                : true
 
-    return companies.filter(c =>
-      [
+      if (!matchesDashboard) return false
+      if (!q) return true
+
+      return [
         c.company_name,
         c.system_name,
         c.supervisor_name,
@@ -354,8 +370,8 @@ Equipe Automatize OS`
             .toLowerCase()
             .includes(q)
         )
-    )
-  }, [companies, search])
+    })
+  }, [companies, search, dashboardFilter])
 
   const metrics = useMemo(() => ({
     total: companies.length,
@@ -376,6 +392,27 @@ Equipe Automatize OS`
       c => !c.access_active
     ).length
   }), [companies])
+
+  const filterLabels = {
+    all: 'Todas as assistências',
+    active: 'Acessos ativos',
+    expiring: 'Vencem em até 7 dias',
+    blocked: 'Assistências bloqueadas'
+  }
+
+  function selectDashboardFilter(nextFilter) {
+    setDashboardFilter(nextFilter)
+    setSearch('')
+
+    setTimeout(() => {
+      document
+        .getElementById('master-company-list')
+        ?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        })
+    }, 0)
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -406,29 +443,73 @@ Equipe Automatize OS`
           title="Assistências"
           value={metrics.total}
           icon={<Building2/>}
+          active={dashboardFilter === 'all'}
+          onClick={() =>
+            selectDashboardFilter('all')
+          }
         />
 
         <Metric
           title="Acessos ativos"
           value={metrics.active}
           icon={<CheckCircle/>}
+          active={dashboardFilter === 'active'}
+          onClick={() =>
+            selectDashboardFilter('active')
+          }
         />
 
         <Metric
           title="Vencem em 7 dias"
           value={metrics.expiring}
           icon={<Clock/>}
+          active={dashboardFilter === 'expiring'}
+          onClick={() =>
+            selectDashboardFilter('expiring')
+          }
         />
 
         <Metric
           title="Bloqueadas"
           value={metrics.blocked}
           icon={<Ban/>}
+          active={dashboardFilter === 'blocked'}
+          onClick={() =>
+            selectDashboardFilter('blocked')
+          }
         />
 
       </div>
 
-      <div className="surface p-4">
+      <div
+        id="master-company-list"
+        className="surface p-4 space-y-3 scroll-mt-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <p className="text-xs text-slate-500">
+              Filtro do dashboard
+            </p>
+
+            <p className="font-semibold">
+              {filterLabels[dashboardFilter]}
+              {' • '}
+              {filtered.length} assistência(s)
+            </p>
+          </div>
+
+          {dashboardFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() =>
+                selectDashboardFilter('all')
+              }
+              className="px-3 py-2 border rounded-xl text-sm font-semibold"
+            >
+              Limpar filtro
+            </button>
+          )}
+        </div>
 
         <div className="relative">
           <Search
@@ -451,6 +532,16 @@ Equipe Automatize OS`
       {loading ? (
         <div className="surface p-8 text-center">
           Carregando assistências...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="surface p-8 text-center">
+          <p className="font-semibold">
+            Nenhuma assistência encontrada.
+          </p>
+
+          <p className="text-sm text-slate-500 mt-1">
+            Ajuste a busca ou limpe o filtro do dashboard.
+          </p>
         </div>
       ) : (
         <div className="grid lg:grid-cols-2 gap-4">
@@ -1036,11 +1127,28 @@ Equipe Automatize OS`
 function Metric({
   title,
   value,
-  icon
+  icon,
+  active = false,
+  onClick
 }) {
   return (
-    <div className="surface p-4">
-      <div className="text-slate-500 mb-2">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        active
+          ? 'surface p-4 text-left border-2 border-slate-900 bg-slate-50 transition active:scale-[0.99]'
+          : 'surface p-4 text-left border-2 border-transparent hover:border-slate-300 transition active:scale-[0.99]'
+      }
+    >
+      <div
+        className={
+          active
+            ? 'text-slate-900 mb-2'
+            : 'text-slate-500 mb-2'
+        }
+      >
         {icon}
       </div>
 
@@ -1051,7 +1159,11 @@ function Metric({
       <p className="text-2xl font-bold mt-1">
         {value}
       </p>
-    </div>
+
+      <p className="text-xs text-slate-400 mt-2">
+        Toque para filtrar
+      </p>
+    </button>
   )
 }
 
