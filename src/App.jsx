@@ -1307,6 +1307,7 @@ export default function App() {
                 company={company}
                 profile={profile}
                 session={session}
+                isPlatformAdmin={isPlatformAdmin}
                 onSignOut={signOut}
                 companyLogoUrl={companyLogoUrl}
                 onSaveCompany={saveCompanyBranding}
@@ -4414,6 +4415,7 @@ function SettingsView({
   company,
   profile,
   session,
+  isPlatformAdmin = false,
   onSignOut,
   companyLogoUrl,
   onSaveCompany
@@ -4572,10 +4574,12 @@ function SettingsView({
 
           <div>
             <p className="text-xs text-slate-500">Acesso</p>
-            <p>
-              {profile?.role === 'supervisor'
-                ? 'Supervisor'
-                : 'Técnico'}
+            <p className="font-semibold">
+              {isPlatformAdmin
+                ? 'Administrador Master'
+                : profile?.role === 'supervisor'
+                  ? 'Supervisor'
+                  : 'Técnico'}
             </p>
           </div>
         </div>
