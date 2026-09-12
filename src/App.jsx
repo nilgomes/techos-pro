@@ -146,7 +146,7 @@ function SubscriptionLockedScreen({
 
         <div className="mt-5 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
           Regularize sua assinatura com a administração
-          do TechOS Pro para continuar utilizando o sistema.
+          do Automatize OS para continuar utilizando o sistema.
           Seus dados permanecem armazenados.
         </div>
 
@@ -169,7 +169,7 @@ function SubscriptionLockedScreen({
         </button>
 
         <p className="text-xs text-center text-slate-400 mt-6">
-          Powered by TechOS Pro
+          Powered by Automatize OS
         </p>
 
       </div>
@@ -992,10 +992,10 @@ export default function App() {
         <div className="text-center">
           <img
             src="/automatize-os.png"
-            alt="TechOS Pro"
+            alt="Automatize OS"
             className="w-44 mx-auto mb-3 rounded-xl"
           />
-          <p>Preparando TechOS Pro...</p>
+          <p>Preparando Automatize OS...</p>
         </div>
       </div>
     )

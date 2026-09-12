@@ -303,7 +303,7 @@ export default function MasterAdminView({
     const text =
 `Olá! Tudo bem?
 
-Estamos entrando em contato sobre a assinatura do TechOS Pro da assistência ${selected.company_name}.
+Estamos entrando em contato sobre a assinatura do Automatize OS da assistência ${selected.company_name}.
 
 Plano: ${form.plan}
 Situação: ${statusLabels[form.subscription_status] || form.subscription_status}
@@ -311,7 +311,7 @@ Vencimento: ${due}
 
 Para evitar interrupção no acesso, pedimos a regularização da assinatura.
 
-Equipe TechOS Pro`
+Equipe Automatize OS`
 
     await supabase.rpc(
       'admin_log_billing_contact',
@@ -387,7 +387,7 @@ Equipe TechOS Pro`
           </p>
 
           <h1 className="text-2xl font-bold">
-            Painel Master TechOS Pro
+            Painel Master Automatize OS
           </h1>
         </div>
 
@@ -478,7 +478,7 @@ Equipe TechOS Pro`
 
                     <p className="text-sm text-slate-500">
                       {company.system_name ||
-                        'TechOS Pro'}
+                        'Automatize OS'}
                     </p>
                   </div>
 
