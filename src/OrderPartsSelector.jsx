@@ -17,6 +17,7 @@ export default function OrderPartsSelector({
   const [existingParts, setExistingParts] = useState([])
   const [orderPhotos, setOrderPhotos] = useState([])
   const [photoError, setPhotoError] = useState('')
+  const [uploadingPhotos, setUploadingPhotos] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
@@ -61,6 +62,111 @@ export default function OrderPartsSelector({
 
     setPhotoError('')
     setOrderPhotos(signedPhotos)
+  }
+
+  async function addOrderPhotos(files) {
+    const selectedFiles = Array.from(files || [])
+
+    if (!orderId || selectedFiles.length === 0 || uploadingPhotos) return
+
+    const invalidFile = selectedFiles.find(
+      file => !file.type?.startsWith('image/')
+    )
+
+    if (invalidFile) {
+      alert('Selecione somente arquivos de imagem.')
+      return
+    }
+
+    const oversized = selectedFiles.find(
+      file => file.size > 10 * 1024 * 1024
+    )
+
+    if (oversized) {
+      alert('Cada foto deve ter no máximo 10 MB.')
+      return
+    }
+
+    setUploadingPhotos(true)
+    setPhotoError('')
+
+    try {
+      const { data: orderRow, error: orderError } = await supabase
+        .from('orders')
+        .select('company_id')
+        .eq('id', orderId)
+        .single()
+
+      if (orderError) throw orderError
+      if (!orderRow?.company_id) {
+        throw new Error('Não foi possível identificar a empresa desta OS.')
+      }
+
+      let failed = 0
+
+      for (const file of selectedFiles) {
+        let uploadedPath = ''
+
+        try {
+          const originalExt =
+            (file.name?.split('.').pop() || 'jpg').toLowerCase()
+
+          const ext = /^[a-z0-9]+$/.test(originalExt)
+            ? originalExt
+            : 'jpg'
+
+          const token = globalThis.crypto?.randomUUID?.()
+            || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+          uploadedPath =
+            `${orderRow.company_id}/${orderId}/${token}.${ext}`
+
+          const { error: uploadError } = await supabase.storage
+            .from('order-photos')
+            .upload(uploadedPath, file, {
+              contentType: file.type || 'image/jpeg',
+              upsert: false
+            })
+
+          if (uploadError) throw uploadError
+
+          const { error: photoInsertError } = await supabase
+            .from('order_photos')
+            .insert({
+              order_id: orderId,
+              company_id: orderRow.company_id,
+              storage_path: uploadedPath,
+              file_name: file.name || `foto-${Date.now()}.${ext}`
+            })
+
+          if (photoInsertError) {
+            await supabase.storage
+              .from('order-photos')
+              .remove([uploadedPath])
+
+            throw photoInsertError
+          }
+        } catch (photoUploadError) {
+          console.error('Erro ao anexar nova foto à OS:', photoUploadError)
+          failed++
+        }
+      }
+
+      await loadOrderPhotos()
+
+      if (failed > 0) {
+        alert(
+          `${selectedFiles.length - failed} foto(s) enviada(s) e ${failed} com erro.`
+        )
+      }
+    } catch (error) {
+      console.error('Erro ao anexar fotos à OS:', error)
+      setPhotoError(
+        error.message || 'Não foi possível anexar novas fotos à OS.'
+      )
+    } finally {
+      setUploadingPhotos(false)
+    }
   }
 
   async function loadData() {
@@ -231,6 +337,52 @@ export default function OrderPartsSelector({
               Atualizar fotos
             </button>
           </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label
+              className={`min-h-[50px] px-3 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold text-center cursor-pointer flex items-center justify-center ${
+                uploadingPhotos ? 'opacity-50 pointer-events-none' : ''
+              }`}
+            >
+              📷 Tirar foto
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={e => {
+                  const files = Array.from(e.target.files || [])
+                  e.target.value = ''
+                  addOrderPhotos(files)
+                }}
+              />
+            </label>
+
+            <label
+              className={`min-h-[50px] px-3 py-3 rounded-xl border text-sm font-semibold text-center cursor-pointer flex items-center justify-center ${
+                uploadingPhotos ? 'opacity-50 pointer-events-none' : ''
+              }`}
+            >
+              🖼️ Galeria
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  const files = Array.from(e.target.files || [])
+                  e.target.value = ''
+                  addOrderPhotos(files)
+                }}
+              />
+            </label>
+          </div>
+
+          {uploadingPhotos && (
+            <div className="bg-blue-50 border border-blue-100 text-blue-700 rounded-xl p-3 text-sm">
+              Enviando nova(s) foto(s)...
+            </div>
+          )}
 
           {photoError && <div className="bg-red-50 border border-red-100 text-red-700 rounded-xl p-3 text-sm">{photoError}</div>}
           {!photoError && orderPhotos.length === 0 && <div className="bg-slate-50 rounded-xl p-4 text-sm text-slate-500">Nenhuma foto anexada a esta OS.</div>}

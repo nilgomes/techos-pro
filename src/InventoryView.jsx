@@ -341,17 +341,40 @@ export default function InventoryView() {
                     Nenhuma foto selecionada
                   </div>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  <label className="px-4 py-3 rounded-xl bg-slate-900 text-white font-semibold cursor-pointer">
-                    Selecionar foto
-                    <input type="file" accept="image/*" onChange={e => choosePhoto(e.target.files?.[0])} className="hidden" />
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="px-4 py-3 rounded-xl bg-slate-900 text-white font-semibold cursor-pointer text-center">
+                    📷 Tirar foto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={e => {
+                        choosePhoto(e.target.files?.[0])
+                        e.target.value = ''
+                      }}
+                      className="hidden"
+                    />
                   </label>
-                  {photoFile && (
-                    <button type="button" onClick={resetPhoto} className="px-4 py-3 rounded-xl border font-semibold">
-                      Remover foto
-                    </button>
-                  )}
+
+                  <label className="px-4 py-3 rounded-xl border font-semibold cursor-pointer text-center">
+                    🖼️ Galeria
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => {
+                        choosePhoto(e.target.files?.[0])
+                        e.target.value = ''
+                      }}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
+
+                {photoFile && (
+                  <button type="button" onClick={resetPhoto} className="px-4 py-3 rounded-xl border font-semibold">
+                    Remover foto
+                  </button>
+                )}
                 <p className="text-xs text-slate-500">Imagem de até 5 MB.</p>
               </div>
             </label>

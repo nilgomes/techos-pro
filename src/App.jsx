@@ -2886,21 +2886,44 @@ function NewOrder({ clients, services, onSave, onCancel }) {
           <div>
             <span className="label">Fotos do aparelho</span>
 
-            <label className="flex items-center justify-center gap-3 min-h-[58px] px-4 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-700 font-semibold active:bg-slate-100 cursor-pointer">
-              <Camera size={22} className="text-blue-600"/>
-              <span>Adicionar fotos</span>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex items-center justify-center gap-2 min-h-[58px] px-3 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-700 font-semibold active:bg-slate-100 cursor-pointer">
+                <Camera size={21} className="text-blue-600"/>
+                <span>Tirar foto</span>
 
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={e => set('photos', Array.from(e.target.files || []))}
-              />
-            </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={e => {
+                    const files = Array.from(e.target.files || [])
+                    e.target.value = ''
+                    set('photos', [...f.photos, ...files])
+                  }}
+                />
+              </label>
+
+              <label className="flex items-center justify-center gap-2 min-h-[58px] px-3 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-700 font-semibold active:bg-slate-100 cursor-pointer">
+                <Upload size={21} className="text-blue-600"/>
+                <span>Galeria</span>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    const files = Array.from(e.target.files || [])
+                    e.target.value = ''
+                    set('photos', [...f.photos, ...files])
+                  }}
+                />
+              </label>
+            </div>
 
             <p className="text-xs text-slate-500 mt-2">
-              Use a câmera ou escolha imagens da galeria.
+              Tire uma foto na hora ou selecione uma ou mais imagens da galeria.
             </p>
 
             {f.photos.length > 0 && (
