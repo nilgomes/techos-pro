@@ -40,8 +40,16 @@ export default function MasterAdminView({
   const [selected, setSelected] = useState(null)
   const [users, setUsers] = useState([])
   const [audit, setAudit] = useState([])
+  const [payments, setPayments] = useState([])
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    method: 'pix',
+    reference: '',
+    days: 30
+  })
 
   const [form, setForm] = useState({
     plan: 'starter',
@@ -97,7 +105,7 @@ export default function MasterAdminView({
         company.admin_notes || ''
     })
 
-    const [u, a] = await Promise.all([
+    const [u, a, pay] = await Promise.all([
       supabase.rpc(
         'admin_list_company_users',
         { p_company_id: company.company_id }
@@ -105,14 +113,20 @@ export default function MasterAdminView({
       supabase.rpc(
         'admin_list_audit',
         { p_company_id: company.company_id }
+      ),
+      supabase.rpc(
+        'admin_list_subscription_payments',
+        { p_company_id: company.company_id }
       )
     ])
 
     if (u.error) alert(u.error.message)
     if (a.error) alert(a.error.message)
+    if (pay.error) alert(pay.error.message)
 
     setUsers(u.data || [])
     setAudit(a.data || [])
+    setPayments(pay.data || [])
   }
 
   async function saveCompany(
@@ -192,6 +206,63 @@ export default function MasterAdminView({
       subscription_ends_at:
         end.toISOString().slice(0, 10)
     })
+  }
+
+  async function registerPayment() {
+    if (!selected) return
+
+    const amount = Number(paymentForm.amount || 0)
+
+    if (amount <= 0) {
+      alert('Informe o valor recebido.')
+      return
+    }
+
+    setSaving(true)
+    setMessage('')
+
+    const { error } = await supabase.rpc(
+      'admin_register_subscription_payment',
+      {
+        p_company_id: selected.company_id,
+        p_amount: amount,
+        p_method: paymentForm.method,
+        p_reference: paymentForm.reference || null,
+        p_notes: 'Pagamento registrado pelo Painel Master',
+        p_days: Number(paymentForm.days || 30)
+      }
+    )
+
+    setSaving(false)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setMessage(
+      `Pagamento registrado. Acesso liberado por ${paymentForm.days} dias.`
+    )
+
+    setPaymentForm(prev => ({
+      ...prev,
+      amount: '',
+      reference: ''
+    }))
+
+    await loadCompanies()
+
+    const { data } = await supabase.rpc(
+      'admin_list_companies'
+    )
+
+    const refreshed = (data || []).find(
+      item => item.company_id === selected.company_id
+    )
+
+    if (refreshed) {
+      await openCompany(refreshed)
+    }
   }
 
   async function blockCompany() {
@@ -703,7 +774,7 @@ Equipe TechOS Pro`
               onClick={activate30Days}
               className="py-3 rounded-xl bg-emerald-600 text-white font-semibold"
             >
-              Liberar 30 dias
+              Cortesia +30 dias
             </button>
 
             <button
@@ -726,6 +797,152 @@ Equipe TechOS Pro`
             </button>
 
           </div>
+
+          <div className="border rounded-2xl p-5 space-y-4">
+
+            <div>
+              <h3 className="font-bold text-lg">
+                Registrar pagamento
+              </h3>
+              <p className="text-sm text-slate-500">
+                Ao registrar, a assinatura é renovada automaticamente.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-3">
+
+              <Field
+                label="Valor recebido"
+                type="number"
+                value={paymentForm.amount}
+                onChange={value =>
+                  setPaymentForm(p => ({
+                    ...p,
+                    amount: value
+                  }))
+                }
+              />
+
+              <label>
+                <span className="label">Forma de pagamento</span>
+                <select
+                  className="input"
+                  value={paymentForm.method}
+                  onChange={e =>
+                    setPaymentForm(p => ({
+                      ...p,
+                      method: e.target.value
+                    }))
+                  }
+                >
+                  <option value="pix">Pix</option>
+                  <option value="cash">Dinheiro</option>
+                  <option value="credit_card">Cartão crédito</option>
+                  <option value="debit_card">Cartão débito</option>
+                  <option value="bank_transfer">Transferência</option>
+                  <option value="other">Outro</option>
+                </select>
+              </label>
+
+              <Field
+                label="Referência"
+                value={paymentForm.reference}
+                onChange={value =>
+                  setPaymentForm(p => ({
+                    ...p,
+                    reference: value
+                  }))
+                }
+              />
+
+            </div>
+
+            <div>
+              <p className="label">Período de acesso</p>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[30, 90, 365].map(days => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() =>
+                      setPaymentForm(p => ({
+                        ...p,
+                        days
+                      }))
+                    }
+                    className={
+                      paymentForm.days === days
+                        ? 'py-3 rounded-xl bg-slate-900 text-white font-semibold'
+                        : 'py-3 rounded-xl border font-semibold'
+                    }
+                  >
+                    {days === 365 ? '1 ano' : `${days} dias`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={saving}
+              onClick={registerPayment}
+              className="btn-primary w-full justify-center"
+            >
+              <Save size={18}/>
+              Registrar pagamento e liberar
+            </button>
+
+          </div>
+
+          {payments.length > 0 && (
+            <div className="border rounded-2xl overflow-hidden">
+
+              <div className="p-4 border-b bg-slate-50">
+                <h3 className="font-bold">
+                  Histórico de pagamentos
+                </h3>
+              </div>
+
+              {payments.map(payment => (
+                <div
+                  key={payment.id}
+                  className="p-4 border-b last:border-0"
+                >
+                  <div className="flex justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">
+                        {Number(payment.amount || 0).toLocaleString(
+                          'pt-BR',
+                          {
+                            style: 'currency',
+                            currency: 'BRL'
+                          }
+                        )}
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        {dateBR(payment.paid_at)}
+                        {' • '}
+                        {payment.coverage_days} dias
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-sm font-semibold">
+                        Até {dateBR(payment.period_end)}
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        {payment.method || '-'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+            </div>
+          )}
 
           <button
             type="button"
