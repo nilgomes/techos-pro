@@ -225,6 +225,9 @@ function StatusBadge({ status }) {
 export default function App() {
   const [session, setSession] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
+  const [passwordRecovery, setPasswordRecovery] = useState(
+    () => new URLSearchParams(window.location.search).get('reset') === '1'
+  )
   const [tab, setTab] = useState('dashboard')
   const [mobileMenu, setMobileMenu] = useState(false)
 
@@ -259,7 +262,11 @@ export default function App() {
       setLoadingAuth(false)
     })
 
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+      }
+
       setSession(next)
       setLoadingAuth(false)
     })
@@ -1000,6 +1007,22 @@ export default function App() {
     )
   }
 
+  if (passwordRecovery && session) {
+    return (
+      <PasswordRecoveryScreen
+        onDone={() => {
+          setPasswordRecovery(false)
+
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.origin + window.location.pathname
+          )
+        }}
+      />
+    )
+  }
+
   if (!session) return <AuthScreen />
 
   if (!adminReady) {
@@ -1380,6 +1403,123 @@ function NavItem({ icon, label, active, onClick }) {
   )
 }
 
+
+function PasswordRecoveryScreen({ onDone }) {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setErr('')
+    setMsg('')
+
+    if (password.length < 8) {
+      setErr('A nova senha deve ter pelo menos 8 caracteres.')
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setErr('As senhas não coincidem.')
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password
+      })
+
+      if (error) throw error
+
+      setMsg('Senha alterada com sucesso.')
+
+      setTimeout(() => {
+        onDone?.()
+      }, 700)
+    } catch (e) {
+      setErr(
+        e.message ||
+        'Não foi possível alterar a senha.'
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0B1220] flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-[28px] shadow-2xl p-7">
+
+        <div className="mb-7 text-center">
+          <div className="bg-black rounded-2xl p-3 mb-4">
+            <img
+              src="/automatize-os.png"
+              alt="Automatize OS"
+              className="w-full max-w-[240px] mx-auto rounded-xl"
+            />
+          </div>
+
+          <h1 className="text-xl font-bold">
+            Criar nova senha
+          </h1>
+
+          <p className="text-sm text-slate-500 mt-1">
+            Digite uma nova senha para sua conta.
+          </p>
+        </div>
+
+        {err && (
+          <div className="bg-red-50 text-red-700 p-3 rounded-xl mb-4 text-sm">
+            {err}
+          </div>
+        )}
+
+        {msg && (
+          <div className="bg-green-50 text-green-700 p-3 rounded-xl mb-4 text-sm">
+            {msg}
+          </div>
+        )}
+
+        <form onSubmit={submit} className="space-y-4">
+          <Field
+            label="Nova senha"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            placeholder="Mínimo de 8 caracteres"
+            required
+          />
+
+          <Field
+            label="Confirmar nova senha"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="Digite a senha novamente"
+            required
+          />
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold disabled:opacity-50"
+          >
+            {busy ? 'Salvando...' : 'Alterar senha'}
+          </button>
+        </form>
+
+        <p className="text-xs text-center text-slate-400 mt-6">
+          Powered by Automatize OS
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function AuthScreen() {
   const inviteParams = new URLSearchParams(window.location.search)
   const initialInviteCode = inviteParams.get('invite') || ''
@@ -1394,6 +1534,44 @@ function AuthScreen() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
+
+  async function sendPasswordReset() {
+    setErr('')
+    setMsg('')
+
+    const targetEmail = email.trim()
+
+    if (!targetEmail) {
+      setErr('Informe seu e-mail para recuperar a senha.')
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          targetEmail,
+          {
+            redirectTo:
+              `${window.location.origin}/?reset=1`
+          }
+        )
+
+      if (error) throw error
+
+      setMsg(
+        'Se este e-mail estiver cadastrado, enviaremos um link para criar uma nova senha.'
+      )
+    } catch (e) {
+      setErr(
+        e.message ||
+        'Não foi possível solicitar a recuperação da senha.'
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -1533,6 +1711,17 @@ function AuthScreen() {
                 : 'Entrar'}
           </button>
         </form>
+
+        {!register && (
+          <button
+            type="button"
+            onClick={sendPasswordReset}
+            disabled={busy}
+            className="w-full mt-4 text-sm font-semibold text-slate-600 disabled:opacity-50"
+          >
+            Esqueci minha senha
+          </button>
+        )}
 
         <button
           type="button"
