@@ -247,7 +247,7 @@ function SubscriptionLockedScreen({
             </p>
 
             <p className="text-sm text-blue-700 mt-1">
-              Valor temporário de homologação: R$ 1,00.
+              Valor temporário de homologação: R$ 5,00.
               Nenhum dinheiro real será movimentado.
             </p>
 
@@ -266,7 +266,7 @@ function SubscriptionLockedScreen({
               >
                 {billingBusy === 'pix'
                   ? 'Abrindo...'
-                  : 'Pagar R$ 1 com PIX'}
+                  : 'Pagar R$ 5 com PIX'}
               </button>
 
               <button
@@ -277,7 +277,7 @@ function SubscriptionLockedScreen({
               >
                 {billingBusy === 'card'
                   ? 'Abrindo...'
-                  : 'Assinar R$ 1 no cartão'}
+                  : 'Assinar R$ 5 no cartão'}
               </button>
             </div>
           </div>
