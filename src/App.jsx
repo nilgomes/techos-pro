@@ -106,24 +106,69 @@ function SubscriptionLockedScreen({
     setBillingError('')
 
     try {
-      const { data, error } =
-        await supabase.functions.invoke(
-          'asaas-create-checkout',
-          {
-            body: { mode }
-          }
-        )
+      const {
+        data: sessionData,
+        error: sessionError
+      } = await supabase.auth.getSession()
 
-      if (error) throw error
-
-      if (!data?.url) {
+      if (
+        sessionError ||
+        !sessionData?.session?.access_token
+      ) {
         throw new Error(
-          data?.error ||
-          'Não foi possível abrir o pagamento.'
+          'Sua sessão expirou. Saia e entre novamente.'
         )
       }
 
-      window.location.href = data.url
+      const supabaseUrl =
+        import.meta.env.VITE_SUPABASE_URL
+
+      const publishableKey =
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/asaas-create-checkout`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization:
+              `Bearer ${sessionData.session.access_token}`,
+            apikey: publishableKey
+          },
+          body: JSON.stringify({ mode })
+        }
+      )
+
+      let data = {}
+
+      try {
+        data = await response.json()
+      } catch {
+        data = {}
+      }
+
+      if (!response.ok) {
+        const message = [
+          data?.error,
+          data?.details
+        ]
+          .filter(Boolean)
+          .join(' — ')
+
+        throw new Error(
+          message ||
+          `Falha ao iniciar pagamento (HTTP ${response.status}).`
+        )
+      }
+
+      if (!data?.url) {
+        throw new Error(
+          'O pagamento foi criado, mas o link do checkout não foi retornado.'
+        )
+      }
+
+      window.location.assign(data.url)
     } catch (e) {
       console.error(e)
 
