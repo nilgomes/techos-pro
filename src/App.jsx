@@ -9,6 +9,7 @@ import { supabase } from './lib/supabaseClient'
 import InventoryView from './InventoryView'
 import OrderPartsSelector from './OrderPartsSelector'
 import MasterAdminView from './MasterAdminView'
+import TeamManagementView from './TeamManagementView'
 import * as XLSX from 'xlsx'
 
 const statusLabels = {
@@ -291,6 +292,21 @@ export default function App() {
 
       const master =
         Boolean(adminFlag)
+
+      if (!master) {
+        const {
+          data: accessActive,
+          error: accessError
+        } = await supabase.rpc('my_access_active')
+
+        if (accessError) throw accessError
+
+        if (!accessActive) {
+          alert('Seu acesso a esta assistência foi removido pelo Supervisor.')
+          await supabase.auth.signOut()
+          return
+        }
+      }
 
       setIsPlatformAdmin(master)
 
@@ -1292,10 +1308,10 @@ export default function App() {
           )}
 
           {tab === 'team' && isSupervisor && (
-            <TeamView
-              team={team}
-              invites={invites}
+            <TeamManagementView
               company={company}
+              invites={invites}
+              currentUserId={session?.user?.id}
               onCreateInvite={createTeamInvite}
               onDeleteInvite={deleteTeamInvite}
             />
