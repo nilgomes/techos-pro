@@ -92,6 +92,50 @@ function SubscriptionLockedScreen({
   const access =
     getSubscriptionAccess(company)
 
+  const [billingBusy, setBillingBusy] =
+    useState('')
+
+  const [billingError, setBillingError] =
+    useState('')
+
+  const sandboxBilling =
+    company?.plan === 'starter_sandbox'
+
+  async function openCheckout(mode) {
+    setBillingBusy(mode)
+    setBillingError('')
+
+    try {
+      const { data, error } =
+        await supabase.functions.invoke(
+          'asaas-create-checkout',
+          {
+            body: { mode }
+          }
+        )
+
+      if (error) throw error
+
+      if (!data?.url) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível abrir o pagamento.'
+        )
+      }
+
+      window.location.href = data.url
+    } catch (e) {
+      console.error(e)
+
+      setBillingError(
+        e.message ||
+        'Falha ao iniciar pagamento.'
+      )
+    } finally {
+      setBillingBusy('')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0B1220] flex items-center justify-center p-5">
 
@@ -150,6 +194,49 @@ function SubscriptionLockedScreen({
           do Automatize OS para continuar utilizando o sistema.
           Seus dados permanecem armazenados.
         </div>
+
+        {sandboxBilling && (
+          <div className="mt-6 border-2 border-dashed border-blue-200 bg-blue-50 rounded-2xl p-4">
+            <p className="font-bold text-blue-900">
+              Teste de pagamento — Sandbox
+            </p>
+
+            <p className="text-sm text-blue-700 mt-1">
+              Valor temporário de homologação: R$ 1,00.
+              Nenhum dinheiro real será movimentado.
+            </p>
+
+            {billingError && (
+              <div className="mt-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
+                {billingError}
+              </div>
+            )}
+
+            <div className="grid sm:grid-cols-2 gap-2 mt-4">
+              <button
+                type="button"
+                disabled={Boolean(billingBusy)}
+                onClick={() => openCheckout('pix')}
+                className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-50"
+              >
+                {billingBusy === 'pix'
+                  ? 'Abrindo...'
+                  : 'Pagar R$ 1 com PIX'}
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(billingBusy)}
+                onClick={() => openCheckout('card')}
+                className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50"
+              >
+                {billingBusy === 'card'
+                  ? 'Abrindo...'
+                  : 'Assinar R$ 1 no cartão'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           type="button"
