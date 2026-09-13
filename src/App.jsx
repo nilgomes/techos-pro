@@ -10,6 +10,7 @@ import InventoryView from './InventoryView'
 import OrderPartsSelector from './OrderPartsSelector'
 import MasterAdminView from './MasterAdminView'
 import TeamManagementView from './TeamManagementView'
+import PlansView from './PlansView'
 import * as XLSX from 'xlsx'
 
 const statusLabels = {
@@ -39,7 +40,7 @@ const money = v =>
 const dateBR = v => v ? new Date(v).toLocaleDateString('pt-BR') : '-'
 
 const isProPlan = company =>
-  ['pro', 'starter_sandbox'].includes(
+  ['pro', 'pro_sandbox'].includes(
     String(company?.plan || '').toLowerCase()
   )
 
@@ -107,10 +108,17 @@ function SubscriptionLockedScreen({
     useState('')
 
   const sandboxBilling =
-    company?.plan === 'starter_sandbox'
+    window.location.hostname
+      .includes('onrender.com')
 
-  async function openCheckout(mode) {
-    setBillingBusy(mode)
+  async function openCheckout(
+    mode,
+    planCode
+  ) {
+    const busyKey =
+      `${planCode}:${mode}`
+
+    setBillingBusy(busyKey)
     setBillingError('')
 
     try {
@@ -144,7 +152,10 @@ function SubscriptionLockedScreen({
               `Bearer ${sessionData.session.access_token}`,
             apikey: publishableKey
           },
-          body: JSON.stringify({ mode })
+          body: JSON.stringify({
+            mode,
+            planCode
+          })
         }
       )
 
@@ -255,7 +266,8 @@ function SubscriptionLockedScreen({
             </p>
 
             <p className="text-sm text-blue-700 mt-1">
-              Valor temporário de homologação: R$ 5,00.
+              Starter e Pro estão com valor temporário
+              de R$ 5,00 para homologação.
               Nenhum dinheiro real será movimentado.
             </p>
 
@@ -265,28 +277,76 @@ function SubscriptionLockedScreen({
               </div>
             )}
 
-            <div className="grid sm:grid-cols-2 gap-2 mt-4">
-              <button
-                type="button"
-                disabled={Boolean(billingBusy)}
-                onClick={() => openCheckout('pix')}
-                className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-50"
-              >
-                {billingBusy === 'pix'
-                  ? 'Abrindo...'
-                  : 'Pagar R$ 5 com PIX'}
-              </button>
+            <div className="grid gap-3 mt-4">
 
-              <button
-                type="button"
-                disabled={Boolean(billingBusy)}
-                onClick={() => openCheckout('card')}
-                className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50"
-              >
-                {billingBusy === 'card'
-                  ? 'Abrindo...'
-                  : 'Assinar R$ 5 no cartão'}
-              </button>
+              {[
+                {
+                  title: 'Starter',
+                  code: 'starter_sandbox',
+                  detail: 'OS, clientes, catálogo e equipe'
+                },
+                {
+                  title: 'Pro',
+                  code: 'pro_sandbox',
+                  detail: 'Starter + estoque e financeiro'
+                }
+              ].map(plan => (
+
+                <div
+                  key={plan.code}
+                  className="bg-white border rounded-xl p-3"
+                >
+
+                  <div className="mb-3">
+                    <p className="font-bold text-slate-900">
+                      Plano {plan.title}
+                    </p>
+
+                    <p className="text-xs text-slate-500">
+                      {plan.detail}
+                    </p>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-2">
+
+                    <button
+                      type="button"
+                      disabled={Boolean(billingBusy)}
+                      onClick={() =>
+                        openCheckout(
+                          'pix',
+                          plan.code
+                        )
+                      }
+                      className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                    >
+                      {billingBusy ===
+                        `${plan.code}:pix`
+                        ? 'Abrindo...'
+                        : 'PIX R$ 5'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={Boolean(billingBusy)}
+                      onClick={() =>
+                        openCheckout(
+                          'card',
+                          plan.code
+                        )
+                      }
+                      className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50"
+                    >
+                      {billingBusy ===
+                        `${plan.code}:card`
+                        ? 'Abrindo...'
+                        : 'Cartão R$ 5'}
+                    </button>
+
+                  </div>
+                </div>
+              ))}
+
             </div>
           </div>
         )}
@@ -368,7 +428,16 @@ export default function App() {
   const [passwordRecovery, setPasswordRecovery] = useState(
     () => new URLSearchParams(window.location.search).get('reset') === '1'
   )
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setTab] = useState(() => {
+    const billing =
+      new URLSearchParams(
+        window.location.search
+      ).get('billing')
+
+    return billing
+      ? 'plans'
+      : 'dashboard'
+  })
   const [mobileMenu, setMobileMenu] = useState(false)
 
   const [orders, setOrders] = useState([])
@@ -1226,7 +1295,8 @@ export default function App() {
         ['inventory', <Package size={19}/>, 'Estoque'],
         ['finance', <DollarSign size={19}/>, 'Financeiro']
       ] : []),
-      ['team', <Users size={19}/>, 'Equipe']
+      ['team', <Users size={19}/>, 'Equipe'],
+      ['plans', <DollarSign size={19}/>, 'Planos e assinatura']
     ] : []),
     ['settings', <Settings size={19}/>, 'Minha conta']
   ]
@@ -1485,6 +1555,13 @@ export default function App() {
               currentUserId={session?.user?.id}
               onCreateInvite={createTeamInvite}
               onDeleteInvite={deleteTeamInvite}
+            />
+          )}
+
+          {tab === 'plans' && isSupervisor && (
+            <PlansView
+              company={company}
+              onRefresh={loadAll}
             />
           )}
 
