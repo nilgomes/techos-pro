@@ -681,17 +681,25 @@ Equipe Automatize OS`
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
 
-            <Field
-              label="Plano"
-              value={form.plan}
-              onChange={
-                value =>
+            <label>
+              <span className="label">Plano</span>
+              <select
+                className="input"
+                value={form.plan}
+                onChange={e =>
                   setForm(p => ({
                     ...p,
-                    plan: value
+                    plan: e.target.value
                   }))
-              }
-            />
+                }
+              >
+                <option value="starter">Starter — OS e gestão básica</option>
+                <option value="pro">Pro — estoque e financeiro</option>
+                {form.plan === 'starter_sandbox' && (
+                  <option value="starter_sandbox">Sandbox interno</option>
+                )}
+              </select>
+            </label>
 
             <Field
               label="Limite de usuários"

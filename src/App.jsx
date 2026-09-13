@@ -38,6 +38,14 @@ const money = v =>
 
 const dateBR = v => v ? new Date(v).toLocaleDateString('pt-BR') : '-'
 
+const isProPlan = company =>
+  ['pro', 'starter_sandbox'].includes(
+    String(company?.plan || '').toLowerCase()
+  )
+
+const planLabel = company =>
+  isProPlan(company) ? 'Pro' : 'Starter'
+
 function getSubscriptionAccess(company) {
   if (!company) {
     return {
@@ -1201,6 +1209,7 @@ export default function App() {
     .reduce((a, b) => a + Number(b.total || 0), 0)
 
   const isSupervisor = profile?.role === 'supervisor'
+  const hasProModules = isPlatformAdmin || isProPlan(company)
 
   const nav = [
     ['dashboard', <Home size={19}/>, isSupervisor ? 'Painel Supervisor' : 'Painel Técnico'],
@@ -1213,8 +1222,10 @@ export default function App() {
     ['clients', <Users size={19}/>, 'Clientes'],
     ...(isSupervisor ? [
       ['catalog', <Package size={19}/>, 'Catálogo'],
-      ['inventory', <Package size={19}/>, 'Estoque'],
-      ['finance', <DollarSign size={19}/>, 'Financeiro'],
+      ...(hasProModules ? [
+        ['inventory', <Package size={19}/>, 'Estoque'],
+        ['finance', <DollarSign size={19}/>, 'Financeiro']
+      ] : []),
       ['team', <Users size={19}/>, 'Equipe']
     ] : []),
     ['settings', <Settings size={19}/>, 'Minha conta']
@@ -1269,6 +1280,9 @@ export default function App() {
           <p className="text-xs text-slate-400">Empresa</p>
           <p className="font-semibold truncate mt-1">
             {company?.name || 'Automatize OS'}
+          </p>
+          <p className="text-xs text-blue-300 mt-2 font-semibold">
+            Plano {planLabel(company)}
           </p>
         </div>
       </aside>
@@ -1405,6 +1419,7 @@ export default function App() {
               completed={completed}
               revenue={revenue}
               isSupervisor={isSupervisor}
+              showFinance={hasProModules}
               onNew={() => setTab('new-order')}
               onClient={id => setClientProfileId(id)}
               onEdit={id => setSelectedOrderId(id)}
@@ -1426,6 +1441,7 @@ export default function App() {
             <NewOrder
               clients={clients}
               services={services}
+              allowInventory={hasProModules}
               onSave={createOrder}
               onCancel={() => setTab('orders')}
             />
@@ -1451,11 +1467,11 @@ export default function App() {
             />
           )}
 
-          {tab === 'inventory' && isSupervisor && (
+          {tab === 'inventory' && isSupervisor && hasProModules && (
             <InventoryView />
           )}
 
-          {tab === 'finance' && isSupervisor && (
+          {tab === 'finance' && isSupervisor && hasProModules && (
             <FinanceView
               orders={orders}
               clients={clients}
@@ -1501,6 +1517,7 @@ export default function App() {
           order={orders.find(o => o.id === selectedOrderId)}
           clients={clients}
           services={services}
+          allowInventory={hasProModules}
           onSave={updateOrder}
           onClose={() => setSelectedOrderId(null)}
         />
@@ -1869,7 +1886,7 @@ function AuthScreen() {
   )
 }
 
-function Dashboard({ orders, pending, completed, revenue, isSupervisor, onNew, onClient, onEdit }) {
+function Dashboard({ orders, pending, completed, revenue, isSupervisor, showFinance, onNew, onClient, onEdit }) {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
 
@@ -1886,7 +1903,7 @@ function Dashboard({ orders, pending, completed, revenue, isSupervisor, onNew, o
         </button>
       </div>
 
-      <div className={`grid ${isSupervisor ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
+      <div className={`grid ${isSupervisor && showFinance ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
         <Stat
           title="OS em andamento"
           value={pending}
@@ -1899,7 +1916,7 @@ function Dashboard({ orders, pending, completed, revenue, isSupervisor, onNew, o
           icon={<CheckCircle/>}
         />
 
-        {isSupervisor && (
+        {isSupervisor && showFinance && (
           <Stat
             title="Faturamento"
             value={money(revenue)}
@@ -1907,6 +1924,16 @@ function Dashboard({ orders, pending, completed, revenue, isSupervisor, onNew, o
           />
         )}
       </div>
+
+      {isSupervisor && !showFinance && (
+        <div className="surface p-5 border border-blue-100 bg-blue-50">
+          <p className="text-xs font-bold text-blue-600">PLANO STARTER</p>
+          <h2 className="font-bold text-lg mt-1">Sua operação de OS está completa</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Estoque, peças, caixa, fluxo financeiro, lucro e relatórios ficam disponíveis no Plano Pro.
+          </p>
+        </div>
+      )}
 
       <div className="surface overflow-hidden">
         <div className="p-5 border-b font-semibold">Últimas OS</div>
@@ -2443,7 +2470,7 @@ function ClientProfile({
 }
 
 
-function EditOrderModal({ order, clients, services, onSave, onClose }) {
+function EditOrderModal({ order, clients, services, allowInventory, onSave, onClose }) {
   const [saving, setSaving] = useState(false)
 
   const [f, setF] = useState({
@@ -2459,7 +2486,11 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
     status: order.status || 'pending',
     labor_amount:
       order.labor_amount ?? order.total ?? '',
-    parts_total: 0,
+    parts_total: Math.max(
+      0,
+      Number(order.total || 0) -
+      Number(order.labor_amount ?? order.total ?? 0)
+    ),
     total: order.total || '',
     warranty: order.warranty || '',
     notes: order.notes || ''
@@ -2639,10 +2670,12 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
           onChange={setLaborAmount}
         />
 
-        <OrderPartsSelector
-          orderId={order.id}
-          onTotalChange={setPartsTotal}
-        />
+        {allowInventory && (
+          <OrderPartsSelector
+            orderId={order.id}
+            onTotalChange={setPartsTotal}
+          />
+        )}
 
         <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex justify-between items-center gap-3">
           <div>
@@ -2650,7 +2683,9 @@ function EditOrderModal({ order, clients, services, onSave, onClose }) {
               Total da OS
             </p>
             <p className="text-xs text-emerald-600">
-              Mão de obra + peças
+              {allowInventory
+                ? 'Mão de obra + peças'
+                : 'Valor do serviço'}
             </p>
           </div>
 
@@ -3054,7 +3089,7 @@ async function printOrder(o, company, logoUrl) {
   w.document.close()
 }
 
-function NewOrder({ clients, services, onSave, onCancel }) {
+function NewOrder({ clients, services, allowInventory, onSave, onCancel }) {
   const [saving, setSaving] = useState(false)
 
   const [f, setF] = useState({
@@ -3317,11 +3352,13 @@ function NewOrder({ clients, services, onSave, onCancel }) {
             onChange={setLaborAmount}
           />
 
-          <OrderPartsSelector
-            value={f.parts}
-            onChange={setParts}
-            onTotalChange={setPartsTotal}
-          />
+          {allowInventory && (
+            <OrderPartsSelector
+              value={f.parts}
+              onChange={setParts}
+              onTotalChange={setPartsTotal}
+            />
+          )}
 
           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex justify-between items-center gap-3">
             <div>
@@ -3329,7 +3366,9 @@ function NewOrder({ clients, services, onSave, onCancel }) {
                 Total da OS
               </p>
               <p className="text-xs text-emerald-600">
-                Mão de obra + peças
+                {allowInventory
+                  ? 'Mão de obra + peças'
+                  : 'Valor do serviço'}
               </p>
             </div>
 
