@@ -47,6 +47,15 @@ const isProPlan = company =>
 const planLabel = company =>
   isProPlan(company) ? 'Pro' : 'Starter'
 
+const isSandboxBillingHost = () =>
+  window.location.hostname.includes('onrender.com') ||
+  window.location.hostname === 'teste.automatizeos.com.br'
+
+const billingCodeForPlan = planKey =>
+  isSandboxBillingHost()
+    ? `${planKey}_sandbox`
+    : planKey
+
 function getSubscriptionAccess(company) {
   if (!company) {
     return {
@@ -108,8 +117,11 @@ function SubscriptionLockedScreen({
     useState('')
 
   const sandboxBilling =
-    window.location.hostname
-      .includes('onrender.com')
+    isSandboxBillingHost()
+
+  const selfServiceBilling =
+    sandboxBilling ||
+    window.location.hostname === 'app.automatizeos.com.br'
 
   async function openCheckout(
     mode,
@@ -254,21 +266,34 @@ function SubscriptionLockedScreen({
         </div>
 
         <div className="mt-5 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
-          Regularize sua assinatura com a administração
-          do Automatize OS para continuar utilizando o sistema.
-          Seus dados permanecem armazenados.
+          Escolha um plano e uma forma de pagamento para reativar
+          sua assinatura. Seus dados permanecem armazenados.
         </div>
 
-        {sandboxBilling && (
-          <div className="mt-6 border-2 border-dashed border-blue-200 bg-blue-50 rounded-2xl p-4">
-            <p className="font-bold text-blue-900">
-              Teste de pagamento — Sandbox
+        {selfServiceBilling && (
+          <div className={
+            sandboxBilling
+              ? 'mt-6 border-2 border-dashed border-blue-200 bg-blue-50 rounded-2xl p-4'
+              : 'mt-6 border border-emerald-200 bg-emerald-50 rounded-2xl p-4'
+          }>
+            <p className={
+              sandboxBilling
+                ? 'font-bold text-blue-900'
+                : 'font-bold text-emerald-900'
+            }>
+              {sandboxBilling
+                ? 'Teste de pagamento — Sandbox'
+                : 'Pagamento seguro — Asaas'}
             </p>
 
-            <p className="text-sm text-blue-700 mt-1">
-              Starter e Pro estão com valor temporário
-              de R$ 5,00 para homologação.
-              Nenhum dinheiro real será movimentado.
+            <p className={
+              sandboxBilling
+                ? 'text-sm text-blue-700 mt-1'
+                : 'text-sm text-emerald-700 mt-1'
+            }>
+              {sandboxBilling
+                ? 'Starter e Pro usam R$ 5,00 apenas para homologação. Nenhum dinheiro real será movimentado.'
+                : 'Escolha Starter ou Pro. O pagamento abaixo é uma cobrança real do plano selecionado.'}
             </p>
 
             {billingError && (
@@ -282,12 +307,14 @@ function SubscriptionLockedScreen({
               {[
                 {
                   title: 'Starter',
-                  code: 'starter_sandbox',
+                  code: billingCodeForPlan('starter'),
+                  price: sandboxBilling ? 'R$ 5' : 'R$ 39,90',
                   detail: 'OS, clientes, catálogo e equipe'
                 },
                 {
                   title: 'Pro',
-                  code: 'pro_sandbox',
+                  code: billingCodeForPlan('pro'),
+                  price: sandboxBilling ? 'R$ 5' : 'R$ 69,90',
                   detail: 'Starter + estoque e financeiro'
                 }
               ].map(plan => (
@@ -323,7 +350,7 @@ function SubscriptionLockedScreen({
                       {billingBusy ===
                         `${plan.code}:pix`
                         ? 'Abrindo...'
-                        : 'PIX R$ 5'}
+                        : `PIX ${plan.price}`}
                     </button>
 
                     <button
@@ -340,7 +367,7 @@ function SubscriptionLockedScreen({
                       {billingBusy ===
                         `${plan.code}:card`
                         ? 'Abrindo...'
-                        : 'Cartão R$ 5'}
+                        : `Cartão ${plan.price}`}
                     </button>
 
                   </div>

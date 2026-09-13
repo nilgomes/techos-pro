@@ -24,11 +24,19 @@ const appPlan = value => {
     : 'starter'
 }
 
+const sandboxBilling =
+  window.location.hostname.includes('onrender.com') ||
+  window.location.hostname === 'teste.automatizeos.com.br'
+
+const billingCodeFor = planKey =>
+  sandboxBilling
+    ? `${planKey}_sandbox`
+    : planKey
+
 const planDefinitions = {
   starter: {
     title: 'Starter',
     subtitle: 'Organize sua assistência',
-    billingCode: 'starter_sandbox',
     highlight: false,
     features: [
       'Ordens de Serviço completas',
@@ -49,7 +57,6 @@ const planDefinitions = {
   pro: {
     title: 'Pro',
     subtitle: 'Gerencie toda a operação',
-    billingCode: 'pro_sandbox',
     highlight: true,
     features: [
       'Tudo do Plano Starter',
@@ -86,9 +93,27 @@ export default function PlansView({
   useEffect(() => {
     loadPlans()
 
+    if (!callbackStatus) return
+
+    const url = new URL(window.location.href)
+    url.searchParams.delete('billing')
+
+    window.history.replaceState(
+      {},
+      document.title,
+      `${url.pathname}${url.search}${url.hash}`
+    )
+
+    const timers = []
+
     if (callbackStatus === 'success') {
       setMessage(
-        'Pagamento concluído no Asaas. Aguarde alguns segundos e toque em “Atualizar acesso”.'
+        'Pagamento concluído no Asaas. Atualizando seu plano automaticamente...'
+      )
+
+      timers.push(
+        setTimeout(() => onRefresh?.(), 1500),
+        setTimeout(() => onRefresh?.(), 4000)
       )
     } else if (callbackStatus === 'cancelled') {
       setBillingError(
@@ -99,6 +124,9 @@ export default function PlansView({
         'O checkout expirou. Gere uma nova cobrança.'
       )
     }
+
+    return () =>
+      timers.forEach(timer => clearTimeout(timer))
   }, [callbackStatus])
 
   async function loadPlans() {
@@ -274,24 +302,44 @@ export default function PlansView({
 
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex gap-3">
-        <ShieldCheck
-          className="text-blue-600 shrink-0"
-          size={22}
-        />
+      {sandboxBilling ? (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex gap-3">
+          <ShieldCheck
+            className="text-blue-600 shrink-0"
+            size={22}
+          />
 
-        <div>
-          <p className="font-bold text-blue-900">
-            Homologação — Asaas Sandbox
-          </p>
+          <div>
+            <p className="font-bold text-blue-900">
+              Homologação — Asaas Sandbox
+            </p>
 
-          <p className="text-sm text-blue-700 mt-1">
-            Os preços comerciais já estão definidos.
-            Durante a homologação, os botões continuam abrindo
-            checkouts Sandbox de R$ 5,00. Nenhum dinheiro real será movimentado.
-          </p>
+            <p className="text-sm text-blue-700 mt-1">
+              Os preços comerciais já estão definidos. Durante a homologação,
+              os botões abrem checkouts Sandbox de R$ 5,00.
+              Nenhum dinheiro real será movimentado.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex gap-3">
+          <ShieldCheck
+            className="text-emerald-600 shrink-0"
+            size={22}
+          />
+
+          <div>
+            <p className="font-bold text-emerald-900">
+              Ambiente de produção — Asaas
+            </p>
+
+            <p className="text-sm text-emerald-700 mt-1">
+              Os valores abaixo são os valores reais dos planos.
+              PIX e cartão serão processados no ambiente de produção do Asaas.
+            </p>
+          </div>
+        </div>
+      )}
 
       {billingError && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">
@@ -311,8 +359,11 @@ export default function PlansView({
           planDefinitions
         ).map(([planKey, plan]) => {
 
+          const billingCode =
+            billingCodeFor(planKey)
+
           const checkoutAmount =
-            priceFor(plan.billingCode)
+            priceFor(billingCode)
 
           const commercialPlan =
             planFor(planKey)
@@ -332,11 +383,11 @@ export default function PlansView({
 
           const pixBusy =
             billingBusy ===
-            `${plan.billingCode}:pix`
+            `${billingCode}:pix`
 
           const cardBusy =
             billingBusy ===
-            `${plan.billingCode}:card`
+            `${billingCode}:card`
 
           return (
             <div
@@ -423,9 +474,11 @@ export default function PlansView({
 
                 </div>
 
-                <p className="text-xs text-blue-600 mt-2 font-semibold">
-                  Sandbox: checkout de teste por {loading ? '...' : money(checkoutAmount)}
-                </p>
+                {sandboxBilling && (
+                  <p className="text-xs text-blue-600 mt-2 font-semibold">
+                    Sandbox: checkout de teste por {loading ? '...' : money(checkoutAmount)}
+                  </p>
+                )}
 
               </div>
 
@@ -479,7 +532,7 @@ export default function PlansView({
                   }
                   onClick={() =>
                     openCheckout(
-                      plan.billingCode,
+                      billingCode,
                       'pix'
                     )
                   }
@@ -501,7 +554,7 @@ export default function PlansView({
                   }
                   onClick={() =>
                     openCheckout(
-                      plan.billingCode,
+                      billingCode,
                       'card'
                     )
                   }
