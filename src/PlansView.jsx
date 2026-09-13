@@ -107,11 +107,16 @@ export default function PlansView({
     const { data, error } = await supabase
       .from('billing_plans')
       .select(
-        'code,name,amount,coverage_days,is_active'
+        'code,name,amount,regular_amount,coverage_days,is_active'
       )
       .in(
         'code',
-        ['starter_sandbox', 'pro_sandbox']
+        [
+          'starter',
+          'pro',
+          'starter_sandbox',
+          'pro_sandbox'
+        ]
       )
       .eq('is_active', true)
 
@@ -119,7 +124,7 @@ export default function PlansView({
       console.error(error)
 
       setBillingError(
-        'Não foi possível consultar os planos de homologação.'
+        'Não foi possível consultar os preços dos planos.'
       )
 
       setBillingPlans([])
@@ -130,11 +135,15 @@ export default function PlansView({
     setLoading(false)
   }
 
+  function planFor(code) {
+    return billingPlans.find(
+      plan => plan.code === code
+    ) || null
+  }
+
   function priceFor(code) {
-    return (
-      billingPlans.find(
-        plan => plan.code === code
-      )?.amount || 0
+    return Number(
+      planFor(code)?.amount || 0
     )
   }
 
@@ -277,9 +286,9 @@ export default function PlansView({
           </p>
 
           <p className="text-sm text-blue-700 mt-1">
-            Os valores desta tela são temporários para teste.
-            Nenhum dinheiro real será movimentado.
-            Os preços oficiais serão definidos antes da publicação.
+            Os preços comerciais já estão definidos.
+            Durante a homologação, os botões continuam abrindo
+            checkouts Sandbox de R$ 5,00. Nenhum dinheiro real será movimentado.
           </p>
         </div>
       </div>
@@ -302,8 +311,21 @@ export default function PlansView({
           planDefinitions
         ).map(([planKey, plan]) => {
 
-          const amount =
+          const checkoutAmount =
             priceFor(plan.billingCode)
+
+          const commercialPlan =
+            planFor(planKey)
+
+          const launchAmount =
+            Number(commercialPlan?.amount || 0)
+
+          const regularAmount =
+            Number(
+              commercialPlan?.regular_amount ||
+              launchAmount ||
+              0
+            )
 
           const isCurrent =
             currentPlan === planKey
@@ -329,7 +351,7 @@ export default function PlansView({
               {plan.highlight && (
                 <div className="absolute right-0 top-0 bg-blue-600 text-white px-4 py-1.5 text-xs font-bold rounded-bl-xl flex items-center gap-1">
                   <Sparkles size={14}/>
-                  MAIS COMPLETO
+                  MAIS ESCOLHIDO
                 </div>
               )}
 
@@ -371,16 +393,28 @@ export default function PlansView({
 
               <div className="mt-5">
 
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">
-                  Valor de teste
+                <p className="text-xs uppercase tracking-wide text-emerald-600 font-bold">
+                  Preço especial de lançamento
                 </p>
+
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-sm text-slate-400 line-through">
+                    {loading
+                      ? '...'
+                      : money(regularAmount)}
+                  </span>
+
+                  <span className="text-xs px-2 py-1 bg-emerald-50 text-emerald-700 rounded-full font-bold">
+                    LANÇAMENTO
+                  </span>
+                </div>
 
                 <div className="flex items-end gap-2 mt-1">
 
                   <p className="text-3xl font-bold">
                     {loading
                       ? '...'
-                      : money(amount)}
+                      : money(launchAmount)}
                   </p>
 
                   <span className="text-slate-500 mb-1">
@@ -388,6 +422,10 @@ export default function PlansView({
                   </span>
 
                 </div>
+
+                <p className="text-xs text-blue-600 mt-2 font-semibold">
+                  Sandbox: checkout de teste por {loading ? '...' : money(checkoutAmount)}
+                </p>
 
               </div>
 
@@ -437,7 +475,7 @@ export default function PlansView({
                   disabled={
                     Boolean(billingBusy) ||
                     loading ||
-                    !amount
+                    !checkoutAmount
                   }
                   onClick={() =>
                     openCheckout(
@@ -459,7 +497,7 @@ export default function PlansView({
                   disabled={
                     Boolean(billingBusy) ||
                     loading ||
-                    !amount
+                    !checkoutAmount
                   }
                   onClick={() =>
                     openCheckout(
