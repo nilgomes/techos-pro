@@ -48,8 +48,12 @@ const planLabel = company =>
   isProPlan(company) ? 'Pro' : 'Starter'
 
 const isSandboxBillingHost = () =>
-  window.location.hostname.includes('onrender.com') ||
+  window.location.hostname === 'techos-pro-teste-estoque.onrender.com' ||
   window.location.hostname === 'teste.automatizeos.com.br'
+
+const isProductionBillingHost = () =>
+  window.location.hostname === 'techos-pro-a8p5.onrender.com' ||
+  window.location.hostname === 'app.automatizeos.com.br'
 
 const billingCodeForPlan = planKey =>
   isSandboxBillingHost()
@@ -121,7 +125,7 @@ function SubscriptionLockedScreen({
 
   const selfServiceBilling =
     sandboxBilling ||
-    window.location.hostname === 'app.automatizeos.com.br'
+    isProductionBillingHost()
 
   async function openCheckout(
     mode,
