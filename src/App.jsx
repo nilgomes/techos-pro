@@ -314,7 +314,7 @@ function SubscriptionLockedScreen({
                 {
                   title: 'Pro',
                   code: billingCodeForPlan('pro'),
-                  price: sandboxBilling ? 'R$ 5' : 'R$ 69,90',
+                  price: sandboxBilling ? 'R$ 5' : 'R$ 59,90',
                   detail: 'Starter + estoque e financeiro'
                 }
               ].map(plan => (
